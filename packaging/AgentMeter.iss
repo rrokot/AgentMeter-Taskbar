@@ -37,6 +37,7 @@ SolidCompression=yes
 
 [Tasks]
 Name: "autoupdate"; Description: "Install verified updates automatically"
+Name: "claudecode"; Description: "Connect Claude Code if it has no custom status line"; Flags: unchecked
 
 [Files]
 Source: "{#BuildDirectory}\AgentMeterBand-{#AppVersion}.dll"; DestDir: "{app}"; Flags: ignoreversion onlyifdoesntexist uninsrestartdelete
@@ -45,6 +46,7 @@ Source: "..\src\ClaudeStatusLine.ps1"; DestDir: "{app}"; Flags: ignoreversion
 Source: "..\src\RefreshQuota.ps1"; DestDir: "{app}"; Flags: ignoreversion
 Source: "..\src\RefreshQuota.vbs"; DestDir: "{app}"; Flags: ignoreversion
 Source: "ManageInstallation.ps1"; DestDir: "{app}"; Flags: ignoreversion
+Source: "ClaudeConnection.ps1"; DestDir: "{app}"; Flags: ignoreversion
 Source: "UpdateAgentMeter.ps1"; DestDir: "{app}"; Flags: ignoreversion
 Source: "update-public.xml"; DestDir: "{app}"; Flags: ignoreversion
 Source: "..\LICENSE"; DestDir: "{app}"
@@ -76,10 +78,18 @@ begin
 end;
 
 function PrepareToInstall(var NeedsRestart: Boolean): String;
+var
+  InstalledVersion: String;
+  InstalledVersionNumber, SetupVersionNumber: Int64;
 begin
   Result := '';
   if CompareText(ExpandConstant('{app}'), ExpandConstant('{localappdata}\AgentMeterTaskbar')) <> 0 then
-    Result := 'Install AgentMeter Taskbar in its default local application directory.';
+    Result := 'Install AgentMeter Taskbar in its default local application directory.'
+  else if RegQueryStringValue(HKCU, 'Software\AgentMeterTaskbar', 'Version', InstalledVersion) and
+    StrToVersion(InstalledVersion, InstalledVersionNumber) and
+    StrToVersion('{#AppVersion}', SetupVersionNumber) and
+    (ComparePackedVersion(InstalledVersionNumber, SetupVersionNumber) > 0) then
+    Result := 'A newer version of AgentMeter Taskbar is already installed.';
 end;
 
 function RunInstallationAction(const Action: String): Boolean;
@@ -92,6 +102,8 @@ begin
     ' -ProductVersion {#AppVersion}';
   if (Action = 'Install') and WizardIsTaskSelected('autoupdate') then
     Arguments := Arguments + ' -AutomaticUpdates';
+  if (Action = 'Install') and WizardIsTaskSelected('claudecode') then
+    Arguments := Arguments + ' -ConnectClaude';
   Result := Exec(ExpandConstant('{sys}\WindowsPowerShell\v1.0\powershell.exe'), Arguments,
     ExpandConstant('{app}'), SW_HIDE, ewWaitUntilTerminated, ExitCode) and (ExitCode = 0);
   if not Result then

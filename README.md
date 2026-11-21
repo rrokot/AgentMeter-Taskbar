@@ -20,6 +20,8 @@ Codex quotas appear once a local Codex CLI session has recorded rate limits. The
 
 Claude Code can send its five-hour and weekly usage to AgentMeter through its [status-line command](https://code.claude.com/docs/en/statusline#rate-limit-usage). The CLI supplies these fields for supported claude.ai plans after the first response in a session.
 
+Select **Connect Claude Code** in Setup to add the integration. Setup preserves any existing custom status line. The manual configuration below is useful when you want to combine the integration with an existing script.
+
 Run this in Windows PowerShell to produce the settings entry for your installation:
 
 ```powershell
@@ -42,7 +44,7 @@ The collector runs once a minute under your Windows user account. Claude Code su
 
 Setup enables automatic updates by default. AgentMeter checks GitHub at sign-in and daily, verifies the release signature and installer checksum, and installs newer packages in the background. The toolbar loads the updated DLL the next time Explorer starts. Use **AgentMeter Taskbar → Check for updates** in Start to check on demand, or rerun Setup to change the automatic-update option.
 
-Remove **AgentMeter Taskbar** from **Settings → Apps → Installed apps**. If you added AgentMeter to Claude Code, remove that status-line entry from Claude Code or remove the call from your own script. An Explorer process that has already loaded the toolbar releases it when that process exits.
+Remove **AgentMeter Taskbar** from **Settings → Apps → Installed apps**. Setup removes the Claude Code entry it configured. For integrations you added to your own script, remove the call from that script. An Explorer process that has already loaded the toolbar releases it when that process exits.
 
 ## Development
 

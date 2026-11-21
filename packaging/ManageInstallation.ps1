@@ -1,7 +1,8 @@
 param(
     [Parameter(Mandatory)][ValidateSet('Install', 'Uninstall')][string]$Operation,
     [Parameter(Mandatory)][ValidatePattern('^\d+\.\d+\.\d+$')][string]$ProductVersion,
-    [switch]$AutomaticUpdates
+    [switch]$AutomaticUpdates,
+    [switch]$ConnectClaude
 )
 
 $ErrorActionPreference = 'Stop'
@@ -20,6 +21,9 @@ $toolbarRegistryPath = 'HKCU:\Software\Classes\CLSID\{EA143E8E-217B-4B86-925B-37
 $serverRegistryPath = Join-Path $toolbarRegistryPath 'InprocServer32'
 $deskBandCategoryId = '{00021492-0000-0000-C000-000000000046}'
 $collectorLauncher = Join-Path $installDirectory 'RefreshQuota.vbs'
+$statusLine = Join-Path $installDirectory 'ClaudeStatusLine.ps1'
+$managedClaudeSettings = (Get-ItemProperty -LiteralPath $productRegistryPath -Name ClaudeSettingsPath -ErrorAction SilentlyContinue).ClaudeSettingsPath
+. (Join-Path $installDirectory 'ClaudeConnection.ps1')
 
 function Remove-AgentMeterTask($TaskName) {
     if (Get-ScheduledTask -TaskName $TaskName -TaskPath $taskPath -ErrorAction SilentlyContinue) {
@@ -32,6 +36,10 @@ function Remove-AgentMeterTask($TaskName) {
 if ($Operation -eq 'Uninstall') {
     Remove-AgentMeterTask $updateTaskName
     Remove-AgentMeterTask $collectorTaskName
+    if ($managedClaudeSettings) {
+        try { [void](Set-AgentMeterClaudeConnection $managedClaudeSettings $statusLine -Remove) }
+        catch { Write-Warning 'Could not remove the AgentMeter status-line entry from Claude Code settings.' }
+    }
     foreach ($registryPath in $toolbarRegistryPath, $productRegistryPath) {
         if (Test-Path -LiteralPath $registryPath) { Remove-Item -LiteralPath $registryPath -Recurse }
     }
@@ -102,6 +110,21 @@ try {
     throw
 }
 
+if ($ConnectClaude) {
+    try {
+        $claudeDirectory = if ($env:CLAUDE_CONFIG_DIR) { $env:CLAUDE_CONFIG_DIR } else { Join-Path $env:USERPROFILE '.claude' }
+        $settingsPath = $ExecutionContext.SessionState.Path.GetUnresolvedProviderPathFromPSPath((Join-Path $claudeDirectory 'settings.json'))
+        if (Set-AgentMeterClaudeConnection $settingsPath $statusLine) {
+            Set-ItemProperty -LiteralPath $productRegistryPath -Name ClaudeSettingsPath -Value $settingsPath
+        }
+    } catch { Write-Warning 'Could not configure the Claude Code status line.' }
+} elseif ($managedClaudeSettings) {
+    try {
+        [void](Set-AgentMeterClaudeConnection $managedClaudeSettings $statusLine -Remove)
+        Remove-ItemProperty -LiteralPath $productRegistryPath -Name ClaudeSettingsPath
+    } catch { Write-Warning 'Could not remove the AgentMeter status-line entry from Claude Code settings.' }
+}
+
 # A pre-release build used a shared task name. Migrate it only when it belongs to this user and installation.
 $legacyTaskName = 'AgentMeter Taskbar Collector'
 $legacyTask = Get-ScheduledTask -TaskName $legacyTaskName -TaskPath $taskPath -ErrorAction SilentlyContinue
@@ -110,4 +133,7 @@ if ($legacyTask -and $legacyTask.Principal.UserId -in $user.Name, $user.User.Val
     try { Remove-AgentMeterTask $legacyTaskName }
     catch { Write-Warning 'Could not remove the previous AgentMeter collector task.' }
 }
+Get-ChildItem -LiteralPath $installDirectory -Filter 'AgentMeterBand-*.dll' -File |
+    Where-Object { $_.FullName -ne $toolbarDll } |
+    Remove-Item -ErrorAction SilentlyContinue
 Start-ScheduledTask -TaskName $collectorTaskName -TaskPath $taskPath -ErrorAction SilentlyContinue
