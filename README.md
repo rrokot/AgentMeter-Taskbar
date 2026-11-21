@@ -36,7 +36,7 @@ Complete a turn in Claude Code and allow up to one minute for the taskbar to upd
 
 ## How it works
 
-The bars are ordered Claude Code 5h, Claude Code 7d, Codex 5h, Codex 7d. A gray bar means that usage is unavailable. When both windows increase, the weekly increase takes priority in the animation.
+AgentMeter adapts to both taskbar orientations. On a horizontal taskbar, each service has two stacked progress tracks with the five-hour quota above the weekly quota. On a vertical taskbar, the bars are ordered Claude Code 5h, Claude Code 7d, Codex 5h, Codex 7d. A gray bar means that usage is unavailable. When both windows increase, the weekly increase takes priority in the animation.
 
 The collector runs once a minute under your Windows user account. Claude Code supplies its quotas through the status line, and AgentMeter reads Codex CLI session files on the same machine. The saved data contains quota values, timestamps, and display status.
 
