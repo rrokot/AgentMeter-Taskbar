@@ -131,6 +131,31 @@ Describe 'Get-CodexLimits' {
 Describe 'Claude Code status-line quotas' {
     $publisherPath = Join-Path $PSScriptRoot '..\src\ClaudeStatusLine.ps1'
 
+    function Invoke-TestStatusLine($Payload, $DataDirectory, [switch]$Quiet) {
+        $powershellPath = Join-Path $PSHOME 'powershell.exe'
+        $arguments = '-NoProfile -NonInteractive -ExecutionPolicy Bypass -File "{0}" -DataDirectory "{1}"' -f $publisherPath, $DataDirectory
+        if ($Quiet) { $arguments += ' -Quiet' }
+        $startInfo = [Diagnostics.ProcessStartInfo]::new($powershellPath, $arguments)
+        $startInfo.UseShellExecute = $false
+        $startInfo.CreateNoWindow = $true
+        $startInfo.RedirectStandardInput = $true
+        $startInfo.RedirectStandardOutput = $true
+        $startInfo.RedirectStandardError = $true
+        $process = [Diagnostics.Process]::Start($startInfo)
+        try {
+            $output = $process.StandardOutput.ReadToEndAsync()
+            $errors = $process.StandardError.ReadToEndAsync()
+            $process.StandardInput.Write($Payload)
+            $process.StandardInput.Close()
+            if (!$process.WaitForExit(10000)) {
+                $process.Kill()
+                throw 'The status-line process timed out.'
+            }
+            if ($process.ExitCode -ne 0) { throw $errors.GetAwaiter().GetResult() }
+            return $output.GetAwaiter().GetResult().Trim()
+        } finally { $process.Dispose() }
+    }
+
     It 'stores only quota fields and reports them on the next collection' {
         $dataDirectory = Join-Path (New-TestDirectory) 'taskbar data'
         $reset = [DateTimeOffset]::UtcNow.AddHours(4).ToUnixTimeSeconds()
@@ -143,8 +168,7 @@ Describe 'Claude Code status-line quotas' {
                 spend_limit = @{ used_percentage = 33 }
             }
         } | ConvertTo-Json -Depth 5
-        $line = $payload | & powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File $publisherPath -DataDirectory $dataDirectory
-        $LASTEXITCODE | Should Be 0
+        $line = Invoke-TestStatusLine $payload $dataDirectory
         $line | Should Be '5h: 14% | 7d: 0%'
 
         $snapshotPath = Join-Path $dataDirectory 'claude-usage.json'
@@ -158,8 +182,7 @@ Describe 'Claude Code status-line quotas' {
         $result.message | Should Be ''
 
         $replacement = '{"rate_limits":{"seven_day":{"used_percentage":37}}}'
-        $line = $replacement | & powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File $publisherPath -DataDirectory $dataDirectory -Quiet
-        $LASTEXITCODE | Should Be 0
+        $line = Invoke-TestStatusLine $replacement $dataDirectory -Quiet
         $line | Should BeNullOrEmpty
         (Read-QuotaJson $snapshotPath).seven_day.percent | Should Be 37
     }
@@ -168,9 +191,7 @@ Describe 'Claude Code status-line quotas' {
         $dataDirectory = New-TestDirectory
         $snapshotPath = Join-Path $dataDirectory 'claude-usage.json'
         Write-QuotaJson $snapshotPath @{ five_hour = @{ percent = 10 } }
-        '{"rate_limits":{"spend_limit":{"used_percentage":50}}}' |
-            & powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File $publisherPath -DataDirectory $dataDirectory
-        $LASTEXITCODE | Should Be 0
+        Invoke-TestStatusLine '{"rate_limits":{"spend_limit":{"used_percentage":50}}}' $dataDirectory | Should BeNullOrEmpty
         (Read-QuotaJson $snapshotPath).five_hour.percent | Should Be 10
     }
 

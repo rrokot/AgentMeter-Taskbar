@@ -6,10 +6,11 @@ param(
 $ErrorActionPreference = 'Stop'
 . (Join-Path $PSScriptRoot 'QuotaData.ps1')
 
-[Console]::InputEncoding = [Text.UTF8Encoding]::new($false)
-$stdin = [Console]::In.ReadToEnd()
-if ([string]::IsNullOrWhiteSpace($stdin)) { return }
-try { $status = ConvertFrom-Json -InputObject $stdin }
+$inputReader = [IO.StreamReader]::new([Console]::OpenStandardInput(), [Text.UTF8Encoding]::new($false))
+try { $payload = $inputReader.ReadToEnd() }
+finally { $inputReader.Dispose() }
+if ([string]::IsNullOrWhiteSpace($payload)) { return }
+try { $status = ConvertFrom-Json -InputObject $payload }
 catch { return }
 
 $observedAt = [DateTimeOffset]::UtcNow
