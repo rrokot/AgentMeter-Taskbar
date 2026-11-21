@@ -1,0 +1,19 @@
+# Build outputs
+*.dll
+*.exe
+bin/
+obj/
+
+# Runtime data and local files
+.idea/
+data.json
+*.json.pending
+claude-cache.json
+claude-usage.json
+claude-usage.lock
+collector.lock
+*.log
+*.zip
+.env
+.env.*
+.credentials.json
