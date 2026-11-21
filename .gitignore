@@ -3,6 +3,7 @@
 *.exe
 bin/
 obj/
+dist/
 
 # Runtime data and local files
 .idea/

@@ -8,15 +8,10 @@ Windows taskbar toolbar for Claude Code and Codex usage limits. It shows the fiv
 
 ## Install
 
-Use Windows 11 x64 with the classic taskbar enabled in StartAllBack. The installer runs under 64-bit Windows PowerShell and builds the toolbar with the .NET Framework compiler included with Windows.
+Use Windows 11 x64 with the classic taskbar enabled in StartAllBack.
 
-1. Extract the ZIP from [GitHub Releases](https://github.com/rrokot/AgentMeter-Taskbar/releases/latest) and open Windows PowerShell in the extracted folder.
-2. Run the installer. This execution policy applies to the PowerShell process started by the command.
-
-   ```powershell
-   powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\Install.ps1
-   ```
-
+1. Download `AgentMeter-Taskbar-Setup-v*.exe` from [GitHub Releases](https://github.com/rrokot/AgentMeter-Taskbar/releases/latest).
+2. Open Setup and follow the wizard. It installs for your Windows account. Windows may show **Unknown publisher** on first launch. Setup also upgrades installations from the original ZIP release.
 3. Right-click the taskbar and choose **Toolbars → AgentMeter Quotas**. If it is missing from the menu, sign out of Windows and sign back in.
 
 Codex quotas appear once a local Codex CLI session has recorded rate limits. The collector reads the latest matching entry in the session logs under `CODEX_HOME` or `%USERPROFILE%\.codex`.
@@ -45,15 +40,9 @@ The collector runs once a minute under your Windows user account. Claude Code su
 
 ## Update or uninstall
 
-Run `Install.ps1` again from a newer release. Restart Windows Explorer or sign out and sign back in to load the new toolbar.
+Setup enables automatic updates by default. AgentMeter checks GitHub at sign-in and daily, verifies the release signature and installer checksum, and installs newer packages in the background. The toolbar loads the updated DLL the next time Explorer starts. Use **AgentMeter Taskbar → Check for updates** in Start to check on demand, or rerun Setup to change the automatic-update option.
 
-To uninstall, turn off **AgentMeter Quotas** in the taskbar menu. If you added AgentMeter to Claude Code, remove that status-line entry or remove it from your own script. Then run:
-
-```powershell
-powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\Uninstall.ps1
-```
-
-If Windows Explorer still has the DLL open, sign out and back in, then rerun the uninstaller.
+Remove **AgentMeter Taskbar** from **Settings → Apps → Installed apps**. If you added AgentMeter to Claude Code, remove that status-line entry from Claude Code or remove the call from your own script. An Explorer process that has already loaded the toolbar releases it when that process exits.
 
 ## Development
 
@@ -62,5 +51,7 @@ Run the tests from Windows PowerShell 5.1 with Pester 3.4. The tests compile the
 ```powershell
 powershell.exe -NoProfile -Command "Invoke-Pester .\tests -EnableExit"
 ```
+
+Windows CI builds the installer and tests setup, upgrade, update preferences, and uninstall. See [the release process](docs/RELEASING.md) for packaging and signing.
 
 AgentMeter Taskbar is distributed under the [MIT License](LICENSE). Parts of the project originated in [AgentMeter v0.2.0](https://github.com/fabianramirez-code/AgentMeter/tree/v0.2.0). Its MIT notice is included in [NOTICE-AgentMeter.txt](NOTICE-AgentMeter.txt).

@@ -21,3 +21,30 @@ jobs:
           $ErrorActionPreference = 'Stop'
           Import-Module Pester -RequiredVersion 3.4.0
           Invoke-Pester .\tests -EnableExit
+      - name: Install the pinned Inno Setup compiler
+        shell: powershell
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $download = Join-Path $env:RUNNER_TEMP 'innosetup-6.7.4.exe'
+          Invoke-WebRequest -UseBasicParsing -Uri 'https://github.com/jrsoftware/issrc/releases/download/is-6_7_4/innosetup-6.7.4.exe' -OutFile $download
+          $expected = 'a549929319f9120716677c685535ca4671e4b937b5fdc87e2585f32d8eb30e8c'
+          if ((Get-FileHash -LiteralPath $download).Hash -ne $expected) { throw 'Inno Setup compiler checksum mismatch.' }
+          $directory = Join-Path $env:RUNNER_TEMP 'InnoSetup'
+          $arguments = '/VERYSILENT', '/SUPPRESSMSGBOXES', '/NORESTART', '/SP-', ('/DIR="' + $directory + '"')
+          $setup = Start-Process -FilePath $download -ArgumentList $arguments -WindowStyle Hidden -PassThru -Wait
+          $compiler = Join-Path $directory 'ISCC.exe'
+          if ($setup.ExitCode -ne 0 -or !(Test-Path -LiteralPath $compiler -PathType Leaf)) { throw 'Inno Setup compiler installation failed.' }
+          "INNO_COMPILER=$compiler" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+      - name: Build and test Windows Setup
+        shell: powershell
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $version = (Get-Content -LiteralPath VERSION -Raw).Trim()
+          & .\packaging\Build-Installer.ps1 -Version '0.1.99' -InnoCompiler $env:INNO_COMPILER -OutputDirectory .\dist\test
+          & .\packaging\Build-Installer.ps1 -Version $version -InnoCompiler $env:INNO_COMPILER
+          & .\packaging\Test-Installer.ps1 -PreviousInstaller .\dist\test\AgentMeter-Taskbar-Setup-v0.1.99.exe -Installer ".\dist\AgentMeter-Taskbar-Setup-v$version.exe" -Version $version
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: windows-installer
+          path: dist/AgentMeter-Taskbar-Setup-*.exe
+          if-no-files-found: error
