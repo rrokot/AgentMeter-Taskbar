@@ -19,12 +19,8 @@ $deskBandCategoryId = '{00021492-0000-0000-C000-000000000046}'
 $toolbarClassId = '{EA143E8E-217B-4B86-925B-37EA04848915}'
 $toolbarClassRegistryPath = "HKCU:\Software\Classes\CLSID\$toolbarClassId"
 $inprocServerRegistryPath = Join-Path $toolbarClassRegistryPath 'InprocServer32'
-$compilerPath = Join-Path $env:WINDIR 'Microsoft.NET\Framework64\v4.0.30319\csc.exe'
 $scriptHostPath = Join-Path $env:WINDIR 'System32\wscript.exe'
 
-if (!(Test-Path -LiteralPath $compilerPath)) {
-    throw 'The 64-bit .NET Framework compiler is unavailable.'
-}
 if (!(Test-Path -LiteralPath $scriptHostPath)) {
     throw 'Windows Script Host is unavailable.'
 }
@@ -45,14 +41,8 @@ $previousServerRegistration = Get-ItemProperty -LiteralPath $inprocServerRegistr
 $toolbarWasRegistered = Test-Path -LiteralPath $toolbarClassRegistryPath
 $collectorTaskAlreadyExists = [bool](Get-ScheduledTask -TaskName $collectorTaskName -TaskPath $collectorTaskPath -ErrorAction SilentlyContinue)
 try {
-    $toolbarSourcePath = Join-Path $PSScriptRoot 'src\AgentMeterBand.cs'
-    $compilerArguments = @(
-        '/nologo', '/target:library', '/platform:x64'
-        '/r:System.Drawing.dll', '/r:System.Windows.Forms.dll', '/r:System.Web.Extensions.dll'
-        "/out:$toolbarDllPath", $toolbarSourcePath
-    )
-    & $compilerPath @compilerArguments
-    if ($LASTEXITCODE -ne 0) { throw 'Could not build the toolbar.' }
+    $version = (Get-Content -LiteralPath (Join-Path $PSScriptRoot 'VERSION') -Raw).Trim()
+    & (Join-Path $PSScriptRoot 'packaging\Build-Toolbar.ps1') -Version $version -OutputPath $toolbarDllPath
     foreach ($collectorFileName in 'QuotaData.ps1', 'ClaudeStatusLine.ps1', 'RefreshQuota.ps1', 'RefreshQuota.vbs') {
         Copy-Item -LiteralPath (Join-Path $PSScriptRoot "src\$collectorFileName") -Destination $installDirectory -Force
     }

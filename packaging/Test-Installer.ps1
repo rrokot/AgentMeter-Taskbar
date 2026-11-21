@@ -34,6 +34,9 @@ function Assert-InstalledVersion($ExpectedVersion) {
     if (([uri]$server.CodeBase).LocalPath -ne $expectedDll -or !(Test-Path -LiteralPath $expectedDll -PathType Leaf)) {
         throw 'Explorer registration does not reference the packaged toolbar.'
     }
+    if ((Get-Item -LiteralPath $expectedDll).VersionInfo.ProductVersion -ne $ExpectedVersion) {
+        throw 'The toolbar version shown in the popup does not match the installed package.'
+    }
 }
 
 function Invoke-TestAutomaticUpdate {

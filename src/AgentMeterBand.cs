@@ -5,6 +5,7 @@ using System.Diagnostics;
 using System.Globalization;
 using System.IO;
 using System.Collections.Generic;
+using System.Reflection;
 using System.Runtime.InteropServices;
 using System.Web.Script.Serialization;
 using System.Windows.Forms;
@@ -528,6 +529,7 @@ internal sealed class QuotaPopup : Form {
  private const TextFormatFlags LineFlags = TextFormatFlags.NoPadding | TextFormatFlags.NoPrefix |
   TextFormatFlags.SingleLine | TextFormatFlags.VerticalCenter;
  private const TextFormatFlags NoteFlags = TextFormatFlags.NoPadding | TextFormatFlags.NoPrefix | TextFormatFlags.WordBreak;
+ private static readonly string VersionLabel = GetVersionLabel();
 
  internal enum RowKind { Heading, FiveHour, Weekly, Notice }
 
@@ -558,6 +560,12 @@ internal sealed class QuotaPopup : Form {
   StartPosition = FormStartPosition.Manual;
   AutoScaleMode = AutoScaleMode.None;
   SetStyle(ControlStyles.OptimizedDoubleBuffer | ControlStyles.ResizeRedraw, true);
+ }
+
+ private static string GetVersionLabel() {
+  var version = (AssemblyInformationalVersionAttribute)Attribute.GetCustomAttribute(
+   typeof(QuotaPopup).Assembly, typeof(AssemblyInformationalVersionAttribute));
+  return version == null ? "Development build" : "v" + version.InformationalVersion;
  }
 
  protected override bool ShowWithoutActivation { get { return true; } }
@@ -614,7 +622,8 @@ internal sealed class QuotaPopup : Form {
    roundedWindowRadius = cornerRadius;
   }
   AccessibleDescription = String.Join(Environment.NewLine, rows.ConvertAll(row =>
-   String.Join(" ", new[] { row.Label, row.Percent, row.Remaining, row.Note }).Trim()).ToArray());
+   String.Join(" ", new[] { row.Label, row.Percent, row.Remaining, row.Note }).Trim()).ToArray()) +
+   Environment.NewLine + "AgentMeter Taskbar " + VersionLabel;
   Invalidate();
  }
 
@@ -653,7 +662,8 @@ internal sealed class QuotaPopup : Form {
     headingWidth = Math.Max(headingWidth, MeasureLine(row.Label, headingFont));
    }
   }
-  return Math.Max(headingWidth, periodColumnWidth + percentColumnWidth + countdownColumnWidth + 2 * minimumColumnGap);
+  int quotaRowWidth = periodColumnWidth + percentColumnWidth + countdownColumnWidth + 2 * minimumColumnGap;
+  return Math.Max(Math.Max(headingWidth, quotaRowWidth), MeasureLine(VersionLabel, detailFont));
  }
 
  // Use the same layout for measurement and painting so DPI and wrapped notices agree.
@@ -691,7 +701,10 @@ internal sealed class QuotaPopup : Form {
     y += DrawNotice(graphics, row.Label, detailColor, y, contentWidth);
    }
   }
-  return y;
+  y += Scale(8);
+  DrawLine(graphics, VersionLabel, detailFont, detailColor, padding, y, contentWidth, detailFont.Height,
+   LineFlags | TextFormatFlags.Right);
+  return y + detailFont.Height;
  }
 
  private int DrawNotice(Graphics graphics, string value, Color color, int y, int width) {

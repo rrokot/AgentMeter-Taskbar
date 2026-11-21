@@ -1,6 +1,6 @@
 # AgentMeter Taskbar
 
-Windows taskbar toolbar for Claude Code and Codex usage limits. It shows the five-hour and weekly windows for each service and reveals usage and reset times on hover.
+Windows taskbar toolbar for Claude Code and Codex usage limits. It shows the five-hour and weekly windows for each service and reveals usage, reset times, and the running toolbar version on hover.
 
 [Документация на русском](docs/README.ru.md)
 
