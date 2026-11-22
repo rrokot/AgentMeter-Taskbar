@@ -1,7 +1,9 @@
+[CmdletBinding(DefaultParameterSetName='Local')]
 param(
     [Parameter(Mandatory)][ValidatePattern('^\d+\.\d+\.\d+$')][string]$Version,
     [Parameter(Mandatory)][string]$Installer,
-    [string]$SigningKey = (Join-Path $env:LOCALAPPDATA 'AgentMeterReleaseKeys\update-signing-key.dpapi')
+    [Parameter(ParameterSetName='Local')][string]$SigningKey = (Join-Path $env:LOCALAPPDATA 'AgentMeterReleaseKeys\update-signing-key.dpapi'),
+    [Parameter(Mandatory, ParameterSetName='Environment')][switch]$UseEnvironmentKey
 )
 
 $ErrorActionPreference = 'Stop'
@@ -17,10 +19,19 @@ $manifest = @{
     sha256 = (Get-FileHash -LiteralPath $installerFile.FullName -Algorithm SHA256).Hash.ToLowerInvariant()
 }
 $payload = [Text.Encoding]::UTF8.GetBytes((ConvertTo-Json -InputObject $manifest -Compress))
-$privateKey = [Security.Cryptography.ProtectedData]::Unprotect([IO.File]::ReadAllBytes($SigningKey), $null, 'CurrentUser')
 $rsa = [Security.Cryptography.RSACryptoServiceProvider]::new()
 $rsa.PersistKeyInCsp = $false
+$privateKey = $null
 try {
+    if ($UseEnvironmentKey) {
+        if ([string]::IsNullOrWhiteSpace($env:AGENTMETER_UPDATE_SIGNING_KEY)) {
+            throw 'The release-signing environment has no update signing key.'
+        }
+        $privateKey = [Convert]::FromBase64String($env:AGENTMETER_UPDATE_SIGNING_KEY)
+        Remove-Item Env:AGENTMETER_UPDATE_SIGNING_KEY
+    } else {
+        $privateKey = [Security.Cryptography.ProtectedData]::Unprotect([IO.File]::ReadAllBytes($SigningKey), $null, 'CurrentUser')
+    }
     $rsa.FromXmlString([Text.Encoding]::UTF8.GetString($privateKey))
     if ($rsa.ToXmlString($false) -ne $publicKey) { throw 'Private key does not match the installed update trust key.' }
     $sha256Oid = [Security.Cryptography.CryptoConfig]::MapNameToOID('SHA256')
@@ -34,5 +45,5 @@ try {
     $feedPath
 } finally {
     $rsa.Dispose()
-    [Array]::Clear($privateKey, 0, $privateKey.Length)
+    if ($privateKey) { [Array]::Clear($privateKey, 0, $privateKey.Length) }
 }

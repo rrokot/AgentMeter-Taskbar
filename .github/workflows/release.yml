@@ -1,0 +1,91 @@
+name: Windows release
+
+on:
+  workflow_dispatch:
+    inputs:
+      publish:
+        description: Publish the signed installer as the latest release
+        type: boolean
+        default: false
+
+permissions: {}
+
+concurrency:
+  group: windows-release
+  cancel-in-progress: false
+
+jobs:
+  build:
+    if: github.ref == 'refs/heads/main'
+    permissions:
+      contents: read
+    uses: ./.github/workflows/ci.yml
+
+  sign:
+    name: Sign and verify update assets
+    needs: build
+    runs-on: windows-2025
+    timeout-minutes: 10
+    environment: release-signing
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0
+        with:
+          persist-credentials: false
+      - uses: actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131 # v7.0.0
+        with:
+          name: windows-installer
+          path: dist
+      - name: Sign the update manifest
+        shell: powershell
+        env:
+          AGENTMETER_UPDATE_SIGNING_KEY: ${{ secrets.AGENTMETER_UPDATE_SIGNING_KEY }}
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $version = (Get-Content -LiteralPath VERSION -Raw).Trim()
+          .\packaging\Sign-UpdateFeed.ps1 -Version $version -Installer ".\dist\AgentMeter-Taskbar-Setup-v$version.exe" -UseEnvironmentKey
+      - name: Verify with the installed updater's public key
+        shell: powershell
+        run: |
+          . .\packaging\UpdateAgentMeter.ps1
+          $version = (Get-Content -LiteralPath VERSION -Raw).Trim()
+          $publicKey = Get-Content -LiteralPath .\packaging\update-public.xml -Raw
+          $manifest = Read-VerifiedUpdate (Get-Content -LiteralPath .\dist\agentmeter-update.json -Raw) $publicKey ([version]'0.0.0')
+          if (!$manifest -or $manifest.version -cne $version) { throw 'The signed update version does not match VERSION.' }
+          $installerName = "AgentMeter-Taskbar-Setup-v$version.exe"
+          Assert-UpdateInstallerHash (Join-Path .\dist $installerName) $manifest.sha256
+          $checksumPath = Join-Path (Resolve-Path -LiteralPath .\dist).Path "AgentMeter-Taskbar-Setup-v$version.sha256"
+          [IO.File]::WriteAllText($checksumPath, "$($manifest.sha256)  $installerName" + [Environment]::NewLine, [Text.Encoding]::ASCII)
+      - uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6.0.0
+        with:
+          name: signed-release
+          path: |
+            dist/AgentMeter-Taskbar-Setup-*.exe
+            dist/AgentMeter-Taskbar-Setup-*.sha256
+            dist/agentmeter-update.json
+          if-no-files-found: error
+          retention-days: 7
+
+  publish:
+    name: Publish GitHub release
+    if: inputs.publish
+    needs: sign
+    runs-on: windows-2025
+    timeout-minutes: 10
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0
+        with:
+          persist-credentials: false
+      - uses: actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131 # v7.0.0
+        with:
+          name: signed-release
+          path: dist
+      - name: Publish the tested release
+        shell: powershell
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          .\packaging\Publish-Release.ps1 -AssetDirectory .\dist -Commit $env:GITHUB_SHA -Repository $env:GITHUB_REPOSITORY
