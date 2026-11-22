@@ -202,7 +202,7 @@ Describe 'Claude Code status-line quotas' {
         $result.message | Should Match 'Open Usage in Claude Desktop'
     }
 
-    It 'expires each window at its own reset and drops old values without one' {
+    It 'keeps the last percentages when each window expires' {
         $now = [DateTimeOffset]::Parse('2026-06-01T08:00:00Z')
         $snapshotPath = Join-Path (New-TestDirectory) 'claude-usage.json'
         Write-QuotaJson $snapshotPath @{
@@ -211,16 +211,20 @@ Describe 'Claude Code status-line quotas' {
             seven_day = @{ percent = 25; reset = $now.AddDays(5).ToString('o') }
         }
         $result = Get-ClaudeStatusLineLimits $snapshotPath $now
-        $result.limits[0] | Should BeNullOrEmpty
-        $result.limits[1].percent | Should Be 25
+        $output = @{}
+        Add-Limits $output 'claude' $result.limits $result.message $now
+        $output.claude_c1_pct | Should Be ''
+        $output.claude_c1_last_pct | Should Be '76'
+        $output.claude_c2_pct | Should Be '25'
 
         Write-QuotaJson $snapshotPath @{
             observed_at = $now.AddMinutes(-16).ToString('o')
             five_hour = @{ percent = 47 }
         }
         $result = Get-ClaudeStatusLineLimits $snapshotPath $now
-        $result.limits[0] | Should BeNullOrEmpty
-        $result.message | Should Match 'Waiting for current Claude usage'
+        Add-Limits $output 'claude' $result.limits $result.message $now
+        $output.claude_c1_pct | Should Be ''
+        $output.claude_c1_last_pct | Should Be '47'
     }
 }
 
@@ -244,17 +248,21 @@ Describe 'Claude Desktop quota history' {
         $output.claude_c1_reset_at | Should Be ''
     }
 
-    It 'does not display stale history or samples from unknown formats' {
+    It 'marks old history as stale and ignores samples from unknown formats' {
         $historyPath = Join-Path (New-TestDirectory) 'plan-usage-history.json'
         $oldSample = @{ t = $now.AddMinutes(-16).ToUnixTimeMilliseconds(); u = @{ fh = 10 } }
         Write-QuotaJson $historyPath @{ version = 2; samples = @($oldSample) }
-        Get-ClaudeDesktopLimits $historyPath $now | Should BeNullOrEmpty
+        $result = Get-ClaudeDesktopLimits $historyPath $now
+        $output = @{}
+        Add-Limits $output 'claude' $result.limits $result.message $now
+        $output.claude_c1_pct | Should Be ''
+        $output.claude_c1_last_pct | Should Be '10'
         $recentSample = @{ t = $now.AddMinutes(-1).ToUnixTimeMilliseconds(); u = @{ fh = 10 } }
         Write-QuotaJson $historyPath @{ version = 3; samples = @($recentSample) }
         Get-ClaudeDesktopLimits $historyPath $now | Should BeNullOrEmpty
     }
 
-    It 'prefers valid status-line data and falls back if its file is unreadable' {
+    It 'prefers active status-line periods and fills missing periods from Desktop' {
         $directory = New-TestDirectory
         $statusLinePath = Join-Path $directory 'claude-usage.json'
         $historyPath = Join-Path $directory 'plan-usage-history.json'
@@ -266,11 +274,31 @@ Describe 'Claude Desktop quota history' {
         }
         $result = Get-ClaudeLimits $statusLinePath $historyPath $now
         $result.limits[0].percent | Should Be 25
-        $result.limits[1] | Should BeNullOrEmpty
+        $result.limits[1].percent | Should Be 34
 
         Write-TestTextFile $statusLinePath '{'
         $result = Get-ClaudeLimits $statusLinePath $historyPath $now
         $result.limits[0].percent | Should Be 12
         $result.limits[1].percent | Should Be 34
+    }
+
+    It 'carries the last known percentages forward when the sources vanish' {
+        $directory = New-TestDirectory
+        $statusLinePath = Join-Path $directory 'claude-usage.json'
+        $historyPath = Join-Path $directory 'plan-usage-history.json'
+        $previous = [pscustomobject]@{
+            claude_c1_last_pct = '23'
+            claude_c1_observed_at = $now.AddDays(-1).ToString('o')
+            claude_c2_last_pct = '0'
+            claude_c2_observed_at = $now.AddDays(-2).ToString('o')
+        }
+        $result = Get-ClaudeLimits $statusLinePath $historyPath $now $previous
+        $output = @{}
+        Add-Limits $output 'claude' $result.limits $result.message $now
+        $output.claude_status | Should Be 'ok'
+        $output.claude_c1_pct | Should Be ''
+        $output.claude_c1_last_pct | Should Be '23'
+        $output.claude_c2_last_pct | Should Be '0'
+        $output.claude_c2_observed_at | Should Be $previous.claude_c2_observed_at
     }
 }

@@ -34,13 +34,13 @@ $command = 'powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -F
 
 Add the `statusLine` entry to `%USERPROFILE%\.claude\settings.json` or the settings file in `CLAUDE_CONFIG_DIR`. Merge it with any other settings in the file. If you already have a status-line command, feed the same JSON to the AgentMeter script with `-Quiet` from your existing script to keep its output.
 
-Complete a turn in Claude Code and allow up to one minute for the taskbar to update. AgentMeter displays the latest reported value until its reset time. A value with no reset time is shown for 15 minutes from the status-line update.
+Complete a turn in Claude Code and allow up to one minute for the taskbar to update. AgentMeter treats the latest percentage as current until its reset time, or for 15 minutes when the reset time is unknown.
 
 ## How it works
 
 AgentMeter adapts to both taskbar orientations. On a horizontal taskbar, each service has two stacked progress tracks with the five-hour quota above the weekly quota. On a vertical taskbar, the bars are ordered Claude Code 5h, Claude Code 7d, Codex 5h, Codex 7d. A gray bar means that usage is unavailable. When both windows increase, the weekly increase takes priority in the animation.
 
-The collector runs once a minute under your Windows user account. It reads the Claude Code status line, Claude Desktop usage history, and Codex CLI session files on the same machine. When current Claude Code usage is unavailable, AgentMeter uses a Claude Desktop sample up to 15 minutes old. Desktop history supplies percentages alone. The panel displays reset times when Claude Code provides them.
+The collector runs once a minute under your Windows user account. It reads the Claude Code status line, Claude Desktop usage history, and Codex CLI session files on the same machine. Claude Desktop percentages count as current for 15 minutes. AgentMeter keeps the last known Claude percentage for each period across restarts. A dimmed fill and the **Last known** note in the popup identify an older value. The popup includes the observation time.
 
 ## Update or uninstall
 

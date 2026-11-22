@@ -87,4 +87,46 @@ Describe 'AgentMeterBand' {
         $right = [Drawing.Rectangle]::new(1920, 200, 48, 116)
         $location.Invoke($null, @($right, $workArea, $popupSize, 8, $true)).X | Should Be 1628
     }
+
+    It 'shows the last Claude percentages while the collector is offline' {
+        $members = [Reflection.BindingFlags]'Instance, NonPublic'
+        $viewType = [AgentMeterBand].Assembly.GetType('QuotaView')
+        $view = $viewType.GetConstructor($members, $null, [type[]]@([IntPtr]), $null).Invoke(@([IntPtr]::Zero))
+        try {
+            $now = [DateTimeOffset]::UtcNow
+            $writtenAt = $now.AddHours(-1)
+            $snapshot = New-Object 'System.Collections.Generic.Dictionary[string,string]'
+            $snapshot['claude_status'] = 'ok'
+            $snapshot['claude_c1_last_pct'] = '37'
+            $snapshot['claude_c1_observed_at'] = $writtenAt.ToString('o')
+            $snapshot['claude_c2_last_pct'] = '0'
+            $snapshot['claude_c2_observed_at'] = $writtenAt.ToString('o')
+            $viewType.GetMethod('ApplySnapshot', $members).Invoke($view, @($snapshot.PSObject.BaseObject, $writtenAt, $now))
+            $rows = $viewType.GetMethod('BuildPopupRows', $members).Invoke($view, @())
+            $percent = $rows[1].GetType().GetField('Percent', $members)
+            $note = $rows[1].GetType().GetField('Note', $members)
+            $percent.GetValue($rows[1]) | Should Be '37%'
+            $percent.GetValue($rows[2]) | Should Be '0%'
+            $note.GetValue($rows[1]) | Should Match '^Last known'
+        } finally { $view.Dispose() }
+    }
+
+    It 'does not animate the difference between expired and current observations' {
+        $viewType = [AgentMeterBand].Assembly.GetType('QuotaView')
+        $members = [Reflection.BindingFlags]'Static, NonPublic'
+        $now = [DateTimeOffset]::UtcNow
+        $previous = New-Object 'System.Collections.Generic.Dictionary[string,string]'
+        $previous['claude_status'] = 'ok'
+        $previous['claude_c1_pct'] = '23'
+        $previous['claude_c1_fresh_until'] = $now.AddSeconds(-1).ToString('o')
+        $current = New-Object 'System.Collections.Generic.Dictionary[string,string]'
+        $current['claude_status'] = 'ok'
+        $current['claude_c1_pct'] = '41'
+        $current['claude_c1_fresh_until'] = $now.AddMinutes(15).ToString('o')
+        $method = $viewType.GetMethod('GetUsageIncrease', $members)
+        $arguments = @($previous.PSObject.BaseObject, $current.PSObject.BaseObject, 0, $now)
+        $method.Invoke($null, $arguments) | Should Be 0
+        $previous['claude_c1_fresh_until'] = $now.AddMinutes(1).ToString('o')
+        $method.Invoke($null, $arguments) | Should Be 18
+    }
 }

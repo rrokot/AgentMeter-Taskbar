@@ -345,21 +345,31 @@ internal sealed class QuotaView : Control {
   return age >= TimeSpan.Zero && age <= MaximumDataAge;
  }
  private static DateTimeOffset? ReadResetTime(Dictionary<string, string> snapshot, string quotaKey) {
-  string resetAtText;
-  DateTimeOffset resetAt;
-  if (snapshot.TryGetValue(quotaKey + "_reset_at", out resetAtText) &&
-      DateTimeOffset.TryParseExact(resetAtText, "o", CultureInfo.InvariantCulture, DateTimeStyles.None, out resetAt)) return resetAt;
+  return ReadTimestamp(snapshot, quotaKey + "_reset_at");
+ }
+ private static DateTimeOffset? ReadTimestamp(Dictionary<string, string> snapshot, string key) {
+  string value;
+  DateTimeOffset timestamp;
+  if (snapshot.TryGetValue(key, out value) &&
+      DateTimeOffset.TryParseExact(value, "o", CultureInfo.InvariantCulture, DateTimeStyles.None, out timestamp)) return timestamp;
   return null;
+ }
+ private static bool TryReadPercent(Dictionary<string, string> snapshot, string key, out int percent) {
+  string text;
+  percent = 0;
+  if (!snapshot.TryGetValue(key, out text) || !int.TryParse(text, out percent)) return false;
+  percent = Math.Min(100, Math.Max(0, percent));
+  return true;
  }
  private static bool TryGetUsagePercent(Dictionary<string, string> snapshot, int index, DateTimeOffset now,
   DateTimeOffset? resetAt, out int percent) {
-  string status, percentText;
+  string status;
+  string quotaKey = QuotaKeys[index];
   string statusKey = index < QuotaPeriodsPerProvider ? "claude_status" : "codex_status";
   percent = 0;
-  if (resetAt <= now ||
+  if (resetAt <= now || ReadTimestamp(snapshot, quotaKey + "_fresh_until") <= now ||
       !snapshot.TryGetValue(statusKey, out status) || status != "ok" ||
-      !snapshot.TryGetValue(QuotaKeys[index] + "_pct", out percentText) || !int.TryParse(percentText, out percent)) return false;
-  percent = Math.Min(100, Math.Max(0, percent));
+      !TryReadPercent(snapshot, quotaKey + "_pct", out percent)) return false;
   return true;
  }
  private Rectangle GetTrackBounds(int index, int dpi) {
@@ -410,21 +420,25 @@ internal sealed class QuotaView : Control {
    Rectangle track = GetTrackBounds(index, dpi);
    if (track.Width == 0 || track.Height == 0) continue;
    e.Graphics.FillRectangle(lightTheme ? Brushes.Silver : Brushes.DimGray, track);
-   if (!hasFreshSnapshot) continue;
-   DateTimeOffset? resetAt = ReadResetTime(snapshot, QuotaKeys[index]);
-   int percent;
-   if (!TryGetUsagePercent(snapshot, index, now, resetAt, out percent) || percent <= 0) continue;
+   string quotaKey = QuotaKeys[index];
+   DateTimeOffset? resetAt = ReadResetTime(snapshot, quotaKey);
+   int percent = 0;
+   bool current = hasFreshSnapshot && TryGetUsagePercent(snapshot, index, now, resetAt, out percent);
+   if (!current && !TryReadPercent(snapshot, quotaKey + "_last_pct", out percent)) continue;
+   if (percent == 0) continue;
    int trackLength = isVerticalTaskbar ? track.Height : track.Width;
    int fillLength = Math.Max(1, percent * trackLength / 100);
    var fill = isVerticalTaskbar ? new Rectangle(track.X, track.Bottom - fillLength, track.Width, fillLength)
     : new Rectangle(track.X, track.Y, fillLength, track.Height);
    bool weekly = index % QuotaPeriodsPerProvider == 1;
-   using (var brush = new LinearGradientBrush(fill, weekly ? WeeklyTop : FiveHourTop,
-    weekly ? WeeklyBottom : FiveHourBottom, LinearGradientMode.Vertical)) {
+   int opacity = current ? 255 : 105;
+   Color startColor = Color.FromArgb(opacity, weekly ? WeeklyTop : FiveHourTop);
+   Color endColor = Color.FromArgb(opacity, weekly ? WeeklyBottom : FiveHourBottom);
+   using (var brush = new LinearGradientBrush(fill, startColor, endColor, LinearGradientMode.Vertical)) {
     e.Graphics.FillRectangle(brush, fill);
    }
    const int WarningPercent = 60, CriticalPercent = 85;
-   if (percent >= WarningPercent && fillLength > 1) {
+   if (current && percent >= WarningPercent && fillLength > 1) {
     var warningEdge = isVerticalTaskbar ? new Rectangle(fill.X, fill.Y, fill.Width, 1)
      : new Rectangle(fill.Right - 1, fill.Y, 1, fill.Height);
     e.Graphics.FillRectangle(percent >= CriticalPercent ? Brushes.Tomato : Brushes.Gold, warningEdge);
@@ -494,10 +508,13 @@ internal sealed class QuotaView : Control {
   DateTimeOffset now = DateTimeOffset.UtcNow;
   var rows = new List<QuotaPopup.Row>();
   if (!HasFreshSnapshot(now)) {
+   if (snapshot.ContainsKey("claude_c1_last_pct") || snapshot.ContainsKey("claude_c2_last_pct")) {
+    AddProviderRows(rows, "Claude", "claude", now);
+   }
    rows.Add(new QuotaPopup.Row(QuotaPopup.RowKind.Notice,
     snapshotWrittenAt == DateTimeOffset.MinValue ? "Waiting for quota data." : "Quota data is stale."));
   } else {
-   AddProviderRows(rows, "Claude Code", "claude", now);
+   AddProviderRows(rows, "Claude", "claude", now);
    AddProviderRows(rows, "Codex", "codex", now);
   }
   return rows;
@@ -517,12 +534,19 @@ internal sealed class QuotaView : Control {
   string label = SnapshotValue(quotaKey + "_label");
   if (String.IsNullOrWhiteSpace(label)) label = defaultLabel;
   DateTimeOffset? resetAt = ReadResetTime(snapshot, quotaKey);
-  if (resetAt <= now) return new QuotaPopup.Row(kind, label, note: "Waiting for fresh usage data.");
   int percent;
-  if (!int.TryParse(SnapshotValue(quotaKey + "_pct"), out percent)) {
+  bool current = HasFreshSnapshot(now) && !(resetAt <= now) &&
+   !(ReadTimestamp(snapshot, quotaKey + "_fresh_until") <= now);
+  if (!current && TryReadPercent(snapshot, quotaKey + "_last_pct", out percent)) {
+   DateTimeOffset? observedAt = ReadTimestamp(snapshot, quotaKey + "_observed_at");
+   string note = observedAt.HasValue ? "Last known · " + observedAt.Value.LocalDateTime.ToString("g") : "Last known";
+   return new QuotaPopup.Row(kind, label, percent + "%", note: note);
+  }
+  if (!current) return new QuotaPopup.Row(kind, label, note: "Waiting for fresh usage data.");
+  if (!TryReadPercent(snapshot, quotaKey + "_pct", out percent)) {
    return new QuotaPopup.Row(kind, label, note: "Quota data unavailable.");
   }
-  string usage = Math.Min(100, Math.Max(0, percent)) + "%";
+  string usage = percent + "%";
   if (!resetAt.HasValue) {
    return new QuotaPopup.Row(kind, label, usage, note: "Reset time unavailable.");
   }
