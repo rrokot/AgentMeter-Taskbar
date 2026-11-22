@@ -34,7 +34,7 @@ An empty bar can mean 0% usage or missing data. The popup shows which applies. A
 
 ## Update or uninstall
 
-AgentMeter checks for updates at sign-in and once a day. Select **Check for updates** in the popup to check now and open Setup when a new version is available. Background updates take effect the next time Windows Explorer starts.
+AgentMeter checks for updates at sign-in and once a day. Select **Check for updates** in the popup to see the result there. If a new version is available, select **Update** to install it and restart Windows Explorer. Background updates take effect the next time Windows Explorer starts.
 
 To uninstall, open **Settings → Apps → Installed apps → AgentMeter Taskbar**. Setup removes the Claude Code entry it added. If the toolbar is still visible after uninstalling, restart Windows Explorer.
 

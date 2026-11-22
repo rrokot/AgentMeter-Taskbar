@@ -1,3 +1,5 @@
+param([switch]$Quiet)
+
 $ErrorActionPreference = 'Stop'
 
 Add-Type -TypeDefinition @'
@@ -91,9 +93,11 @@ try {
     }
     throw "Windows Explorer did not restart ($shutdownResult)."
 } catch {
-    Add-Type -AssemblyName System.Windows.Forms
-    [void][Windows.Forms.MessageBox]::Show(
-        'AgentMeter is installed. To load the new toolbar, restart Windows Explorer or sign out of Windows and sign back in.',
-        'AgentMeter Taskbar')
+    if (!$Quiet) {
+        Add-Type -AssemblyName System.Windows.Forms
+        [void][Windows.Forms.MessageBox]::Show(
+            'AgentMeter is installed. To load the new toolbar, restart Windows Explorer or sign out of Windows and sign back in.',
+            'AgentMeter Taskbar')
+    }
     exit 1
 }

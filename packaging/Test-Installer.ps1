@@ -40,16 +40,20 @@ function Assert-InstalledVersion($ExpectedVersion) {
     }
 }
 
-function Invoke-TestAutomaticUpdate {
+function Invoke-TestSignedUpdate([switch]$CheckOnly) {
     $testUpdater = Join-Path $logDirectory 'TestUpdateAgentMeter.ps1'
     $feed = Join-Path $logDirectory 'test-update-feed.json'
     $publicKeyPath = Join-Path $installDirectory 'update-public.xml'
     $installedPublicKey = [IO.File]::ReadAllBytes($publicKeyPath)
+    $feedVersion = if ($CheckOnly) {
+        $current = [version]$Version
+        "$($current.Major).$($current.Minor).$($current.Build + 1)"
+    } else { $Version }
     $rsa = [Security.Cryptography.RSACryptoServiceProvider]::new(2048)
     $rsa.PersistKeyInCsp = $false
     try {
         $hash = (Get-FileHash -LiteralPath $Installer -Algorithm SHA256).Hash.ToLowerInvariant()
-        $payload = [Text.Encoding]::UTF8.GetBytes((ConvertTo-Json -InputObject @{ schema = 1; version = $Version; sha256 = $hash }))
+        $payload = [Text.Encoding]::UTF8.GetBytes((ConvertTo-Json -InputObject @{ schema = 1; version = $feedVersion; sha256 = $hash }))
         $sha256Oid = [Security.Cryptography.CryptoConfig]::MapNameToOID('SHA256')
         $manifest = @{
             payload = [Convert]::ToBase64String($payload)
@@ -60,33 +64,47 @@ function Invoke-TestAutomaticUpdate {
     } finally { $rsa.Dispose() }
 
     $fixtureRunner = @'
-param([string]$UpdaterPath)
+param([string]$UpdaterPath, [switch]$CheckOnly)
+
+$ErrorActionPreference = 'Stop'
 
 function Invoke-WebRequest([switch]$UseBasicParsing, $TimeoutSec, $Uri, $OutFile) {
     if ($Uri.EndsWith('/agentmeter-update.json')) {
         Copy-Item -LiteralPath $env:AGENTMETER_TEST_UPDATE_FEED -Destination $OutFile
-    } elseif ($Uri.EndsWith('/AgentMeter-Taskbar-Setup-v' + $env:AGENTMETER_TEST_VERSION + '.exe')) {
+    } elseif (!$CheckOnly -and $Uri.EndsWith('/AgentMeter-Taskbar-Setup-v' + $env:AGENTMETER_TEST_VERSION + '.exe')) {
         Copy-Item -LiteralPath $env:AGENTMETER_TEST_INSTALLER -Destination $OutFile
     } else {
         throw "Unexpected update URL: $Uri"
     }
 }
 
-& $UpdaterPath
-exit $LASTEXITCODE
+if ($CheckOnly) {
+    $check = & $UpdaterPath -Mode Check | ConvertFrom-Json
+    if ($check.status -ne 'available' -or $check.version -ne $env:AGENTMETER_TEST_VERSION) {
+        throw 'Popup check did not return the signed release version.'
+    }
+    $changed = & $UpdaterPath -Mode Install -TargetVersion '0.0.1' | ConvertFrom-Json
+    if ($changed.status -ne 'available' -or $changed.version -ne $check.version) {
+        throw 'Popup install did not stop when the selected version differed from the signed release.'
+    }
+} else {
+    & $UpdaterPath
+    exit $LASTEXITCODE
+}
 '@
     $env:AGENTMETER_TEST_UPDATE_FEED = $feed
     $env:AGENTMETER_TEST_INSTALLER = (Resolve-Path -LiteralPath $Installer).Path
-    $env:AGENTMETER_TEST_VERSION = $Version
+    $env:AGENTMETER_TEST_VERSION = $feedVersion
     $updaterPath = Join-Path $installDirectory 'UpdateAgentMeter.ps1'
     Set-Content -LiteralPath $testUpdater -Value $fixtureRunner -Encoding UTF8
     try {
         $powershell = Join-Path $PSHOME 'powershell.exe'
         $options = '-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'Bypass',
             '-File', ('"' + $testUpdater + '"'), '-UpdaterPath', ('"' + $updaterPath + '"')
+        if ($CheckOnly) { $options += '-CheckOnly' }
         if ((Start-TestSetup $powershell $options) -ne 0) {
             Get-Content -LiteralPath (Join-Path $installDirectory 'updates.log') -ErrorAction SilentlyContinue
-            throw 'The signed background update did not complete.'
+            throw 'The signed update test did not complete.'
         }
     } finally {
         [IO.File]::WriteAllBytes($publicKeyPath, $installedPublicKey)
@@ -117,7 +135,7 @@ try {
         throw 'The previous release did not honor the fixture task selections.'
     }
     $initialUninstall = (Get-ItemProperty -LiteralPath $uninstallKey).UninstallString
-    Invoke-TestAutomaticUpdate
+    Invoke-TestSignedUpdate
     Assert-InstalledVersion $Version
     if (!(Get-Content -LiteralPath $claudeSettings -Raw | ConvertFrom-Json).statusLine.command) {
         throw 'Setup did not connect the existing Claude Code profile.'
@@ -138,7 +156,8 @@ try {
     if ($collectorRun.ExitCode -ne 0 -or !(Test-Path -LiteralPath (Join-Path $installDirectory 'data.json'))) {
         throw 'The packaged collector could not publish a quota snapshot.'
     }
-    Invoke-TestAutomaticUpdate
+    Invoke-TestSignedUpdate
+    Invoke-TestSignedUpdate -CheckOnly
     Assert-InstalledVersion $Version
     if ((Get-ItemProperty -LiteralPath $uninstallKey).UninstallString -ne $initialUninstall) {
         throw 'Upgrade should reuse the Installed apps entry.'

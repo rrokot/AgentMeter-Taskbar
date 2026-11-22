@@ -2,7 +2,6 @@ using System;
 using System.Collections.Generic;
 using System.Drawing;
 using System.Drawing.Drawing2D;
-using System.Reflection;
 using System.Windows.Forms;
 
 internal static class PopupOutline {
@@ -32,7 +31,9 @@ internal sealed class QuotaPopup : Form {
  private const TextFormatFlags LineFlags = TextFormatFlags.NoPadding | TextFormatFlags.NoPrefix |
   TextFormatFlags.SingleLine | TextFormatFlags.VerticalCenter;
  private const TextFormatFlags NoteFlags = TextFormatFlags.NoPadding | TextFormatFlags.NoPrefix | TextFormatFlags.WordBreak;
- private static readonly string VersionLabel = GetVersionLabel();
+ private const string CheckForUpdatesLabel = "Check for updates";
+ private static readonly string VersionLabel = ToolbarUpdater.RunningVersion == null ?
+  "Development build" : "v" + ToolbarUpdater.RunningVersion;
 
  internal enum RowKind { Heading, FiveHour, Weekly, Notice }
 
@@ -50,12 +51,13 @@ internal sealed class QuotaPopup : Form {
 
  private List<Row> rows;
  private readonly Button updateButton = new Button {
-  Text = "Check for updates",
+  Text = CheckForUpdatesLabel,
   FlatStyle = FlatStyle.Flat,
   UseVisualStyleBackColor = false,
   Cursor = Cursors.Hand
  };
  private Font usageFont, headingFont, detailFont;
+ private string updateNotice;
  private int dpi, usageFontPixels, padding, minimumColumnGap;
  private int periodColumnWidth, percentColumnWidth, countdownColumnWidth, footerTop;
  private Size roundedWindowSize;
@@ -77,10 +79,10 @@ internal sealed class QuotaPopup : Form {
   Controls.Add(updateButton);
  }
 
- private static string GetVersionLabel() {
-  var version = (AssemblyInformationalVersionAttribute)Attribute.GetCustomAttribute(
-   typeof(QuotaPopup).Assembly, typeof(AssemblyInformationalVersionAttribute));
-  return version == null ? "Development build" : "v" + version.InformationalVersion;
+ internal void SetUpdateState(string buttonText, string notice, bool enabled) {
+  updateButton.Text = buttonText;
+  updateButton.Enabled = enabled;
+  updateNotice = notice;
  }
 
  protected override bool ShowWithoutActivation { get { return true; } }
@@ -141,7 +143,8 @@ internal sealed class QuotaPopup : Form {
   }
   AccessibleDescription = String.Join(Environment.NewLine, rows.ConvertAll(row =>
    String.Join(" ", new[] { row.Label, row.Percent, row.Remaining, row.Note }).Trim()).ToArray()) +
-   Environment.NewLine + "AgentMeter Taskbar " + VersionLabel;
+   Environment.NewLine + "AgentMeter Taskbar " + VersionLabel +
+   (String.IsNullOrEmpty(updateNotice) ? "" : Environment.NewLine + updateNotice);
   Invalidate();
  }
 
@@ -182,7 +185,9 @@ internal sealed class QuotaPopup : Form {
   return String.IsNullOrEmpty(value) ? 0 : TextRenderer.MeasureText(value, font, Size.Empty, LineFlags).Width;
  }
 
- private int UpdateButtonWidth() { return MeasureLine(updateButton.Text, detailFont) + Scale(20); }
+ private int UpdateButtonWidth() {
+  return Math.Max(MeasureLine(CheckForUpdatesLabel, detailFont), MeasureLine(updateButton.Text, detailFont)) + Scale(20);
+ }
  private int FooterHeight { get { return detailFont.Height + Scale(12); } }
 
  private int MeasureContentWidthAndColumns() {
@@ -239,6 +244,7 @@ internal sealed class QuotaPopup : Form {
    }
   }
   y += Scale(12);
+  if (!String.IsNullOrEmpty(updateNotice)) y += DrawNotice(graphics, updateNotice, detailColor, y, contentWidth);
   if (graphics == null) footerTop = y;
   int versionLeft = padding + UpdateButtonWidth() + minimumColumnGap;
   DrawLine(graphics, VersionLabel, detailFont, detailColor, versionLeft, y, padding + contentWidth - versionLeft, FooterHeight,

@@ -1,4 +1,9 @@
-param([switch]$Interactive)
+[CmdletBinding(DefaultParameterSetName='Automatic')]
+param(
+    [Parameter(ParameterSetName='Interactive')][switch]$Interactive,
+    [Parameter(ParameterSetName='Popup', Mandatory)][ValidateSet('Check','Install')][string]$Mode,
+    [Parameter(ParameterSetName='Popup')][ValidatePattern('^\d+\.\d+\.\d+$')][string]$TargetVersion
+)
 
 $ErrorActionPreference = 'Stop'
 . (Join-Path $PSScriptRoot 'QuotaData.ps1')
@@ -11,9 +16,14 @@ function Show-UpdateMessage([string]$Message) {
     }
 }
 
+function Write-UpdateResult([string]$Status, [string]$Version) {
+    if ($Mode) { ConvertTo-Json -Compress @{ status = $Status; version = $Version } }
+}
+
 $updateLock = Open-QuotaWriterLock (Join-Path $PSScriptRoot 'updates.lock')
 if (!$updateLock) {
     Show-UpdateMessage 'An AgentMeter update check is already running.'
+    Write-UpdateResult 'busy'
     return
 }
 $downloadDirectory = Join-Path $env:TEMP ('AgentMeterUpdate-' + [guid]::NewGuid().ToString('N'))
@@ -33,15 +43,23 @@ try {
     $release = Read-VerifiedUpdate (Get-Content -LiteralPath $feedPath -Raw) $publicKey $installedVersion
     if (!$release) {
         Show-UpdateMessage "AgentMeter Taskbar is up to date ($installedVersion)."
+        Write-UpdateResult 'current' $installedVersion
         return
     }
 
     $version = $release.version
+    if ($Mode -eq 'Check' -or ($Mode -eq 'Install' -and $version -cne $TargetVersion)) {
+        Write-UpdateResult 'available' $version
+        return
+    }
     $installerUri = "$releaseBase/download/v$version/AgentMeter-Taskbar-Setup-v$version.exe"
     Invoke-WebRequest -UseBasicParsing -TimeoutSec 90 -Uri $installerUri -OutFile $installerPath
     Assert-UpdateInstallerHash $installerPath $release.sha256
     $currentVersion = [version](Get-ItemProperty -LiteralPath $registryPath -Name Version).Version
-    if ([version]$version -le $currentVersion) { return }
+    if ([version]$version -le $currentVersion) {
+        Write-UpdateResult 'current' $currentVersion
+        return
+    }
 
     $setupArguments = @('/NORESTART', '/SP-')
     if ($Interactive) {
@@ -55,7 +73,8 @@ try {
     $currentVersion = [version](Get-ItemProperty -LiteralPath $registryPath -Name Version).Version
     if ($currentVersion -ne [version]$version) { throw 'Setup did not register the expected version.' }
 
-    Add-Content -LiteralPath $logPath -Value "$([DateTimeOffset]::Now.ToString('o')) Installed $version"
+    Write-UpdateResult 'installed' $version
+    Add-Content -LiteralPath $logPath -Value "$([DateTimeOffset]::Now.ToString('o')) Installed $version" -ErrorAction SilentlyContinue
 } catch {
     try {
         if ((Test-Path -LiteralPath $logPath) -and (Get-Item -LiteralPath $logPath).Length -gt 65536) {

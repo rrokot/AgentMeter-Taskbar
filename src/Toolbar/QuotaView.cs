@@ -1,12 +1,12 @@
 using System;
 using System.Collections.Generic;
-using System.ComponentModel;
 using System.Diagnostics;
 using System.Drawing;
 using System.Drawing.Drawing2D;
 using System.Globalization;
 using System.IO;
 using System.Runtime.InteropServices;
+using System.Threading.Tasks;
 using System.Web.Script.Serialization;
 using System.Windows.Forms;
 
@@ -48,6 +48,11 @@ internal sealed class QuotaView : Control {
  private DateTimeOffset snapshotWrittenAt;
  private bool lightTheme;
  private bool isVerticalTaskbar;
+ private enum UpdateAction { Check, Install, Restart }
+ private UpdateAction nextUpdateAction;
+ private Version updateVersion;
+ private string updateNotice;
+ private bool updateInProgress;
  [DllImport("user32.dll")] private static extern uint GetDpiForWindow(IntPtr window);
  [DllImport("user32.dll")] [return: MarshalAs(UnmanagedType.Bool)]
  private static extern bool SystemParametersInfo(uint action, uint parameter,
@@ -98,7 +103,7 @@ internal sealed class QuotaView : Control {
   if (!IsHandleCreated || !Visible || !ClientRectangle.Contains(PointToClient(Cursor.Position))) return;
   if (popup == null) {
    popup = new QuotaPopup();
-   popup.UpdateRequested += delegate { StartInteractiveUpdate(); };
+   popup.UpdateRequested += delegate { RunUpdateAction(); };
   }
   UpdatePopup();
   if (!popup.Visible) popup.Show(this);
@@ -119,23 +124,64 @@ internal sealed class QuotaView : Control {
   popupPointerClock.Reset();
   if (popup != null) popup.Hide();
  }
- private void StartInteractiveUpdate() {
-  HidePopup();
-  string updater = Path.Combine(Path.GetDirectoryName(snapshotPath), "UpdateAgentMeter.ps1");
-  string powershell = Path.Combine(Environment.SystemDirectory, @"WindowsPowerShell\v1.0\powershell.exe");
-  if (File.Exists(updater)) {
-   try {
-    using (Process check = Process.Start(new ProcessStartInfo {
-     FileName = powershell,
-     Arguments = "-NoProfile -NonInteractive -ExecutionPolicy Bypass -File \"" + updater + "\" -Interactive",
-     UseShellExecute = false,
-     CreateNoWindow = true
-    })) { }
+ private async void RunUpdateAction() {
+  if (updateInProgress) return;
+  updateInProgress = true;
+  string directory = Path.GetDirectoryName(snapshotPath);
+  try {
+   if (nextUpdateAction == UpdateAction.Restart) {
+    await RestartUpdatedToolbar(directory);
     return;
-   } catch (Win32Exception) { }
+   }
+   Version target = nextUpdateAction == UpdateAction.Install ? updateVersion : null;
+   updateNotice = target == null ? "Checking for updates…" : "Installing v" + target + "…";
+   RefreshUpdatePopup();
+   ToolbarUpdater.Result reply = await ToolbarUpdater.RequestAsync(directory, target);
+   switch (reply.Outcome) {
+    case ToolbarUpdater.Status.Available:
+     updateVersion = reply.Version;
+     nextUpdateAction = UpdateAction.Install;
+     updateNotice = "v" + updateVersion + " is available." + Environment.NewLine + "Updating will restart Explorer.";
+     break;
+    case ToolbarUpdater.Status.Current:
+     if (ToolbarUpdater.RunningVersion != null && reply.Version > ToolbarUpdater.RunningVersion) {
+      updateVersion = reply.Version;
+      nextUpdateAction = UpdateAction.Restart;
+      updateNotice = "v" + updateVersion + " is installed and ready to load.";
+     } else {
+      nextUpdateAction = UpdateAction.Check;
+      updateNotice = "You're up to date.";
+     }
+     break;
+    case ToolbarUpdater.Status.Installed:
+     updateVersion = reply.Version;
+     nextUpdateAction = UpdateAction.Restart;
+     await RestartUpdatedToolbar(directory);
+     break;
+    case ToolbarUpdater.Status.Busy:
+     updateNotice = "An update check is already running.";
+     break;
+    default:
+     updateNotice = target == null ? "Could not check for updates. Try again." : "Could not install the update. Try again.";
+     break;
+   }
+  } finally {
+   updateInProgress = false;
+   RefreshUpdatePopup();
   }
-  MessageBox.Show("Could not start the update check. Run AgentMeter Setup to repair the installation.",
-   "AgentMeter Taskbar", MessageBoxButtons.OK, MessageBoxIcon.Error);
+ }
+ private async Task RestartUpdatedToolbar(string directory) {
+  updateNotice = "v" + updateVersion + " installed. Restarting Explorer…";
+  RefreshUpdatePopup();
+  if (await ToolbarUpdater.RestartExplorerAsync(directory)) {
+   nextUpdateAction = UpdateAction.Check;
+   updateNotice = "v" + updateVersion + " is installed.";
+  } else {
+   updateNotice = "v" + updateVersion + " is installed. Explorer could not restart.";
+  }
+ }
+ private void RefreshUpdatePopup() {
+  if (!IsDisposed && !Disposing && IsHandleCreated && popup != null && popup.Visible) UpdatePopup();
  }
  protected override void OnVisibleChanged(EventArgs e) {
   base.OnVisibleChanged(e);
@@ -154,6 +200,9 @@ internal sealed class QuotaView : Control {
   base.OnHandleDestroyed(e);
  }
  private void UpdatePopup() {
+  string actionText = nextUpdateAction == UpdateAction.Install ? "Update" :
+   nextUpdateAction == UpdateAction.Restart ? "Restart Explorer" : "Check for updates";
+  popup.SetUpdateState(actionText, updateNotice, !updateInProgress);
   int dpi = (int)GetDpiForWindow(Handle);
   popup.UpdateContentAndPosition(BuildPopupRows(), lightTheme, dpi == 0 ? DefaultDpi : dpi,
    RectangleToScreen(ClientRectangle), Screen.FromHandle(Handle).WorkingArea, isVerticalTaskbar);

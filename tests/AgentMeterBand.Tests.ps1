@@ -149,6 +149,13 @@ Describe 'AgentMeterBand' {
             $button.Text | Should Be 'Check for updates'
             $popup.ClientRectangle.Contains($button.Bounds) | Should Be $true
             ($button.Width -ge 120) | Should Be $true
+            $initialButtonWidth = $button.Width
+            $popupType.GetMethod('SetUpdateState', $members).Invoke($popup, @('Update', 'A new version is available.', $true))
+            $popupType.GetMethod('UpdateContentAndPosition', $members).Invoke(
+                $popup, @($rows.PSObject.BaseObject, $false, 144, $band, $workArea, $true))
+            $button.Text | Should Be 'Update'
+            $button.Width | Should Be $initialButtonWidth
+            $popup.AccessibleDescription | Should Match 'A new version is available'
         } finally {
             $popup.Dispose()
             $view.Dispose()
