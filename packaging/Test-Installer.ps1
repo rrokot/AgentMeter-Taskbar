@@ -1,5 +1,6 @@
 param(
     [Parameter(Mandatory)][string]$PreviousInstaller,
+    [Parameter(Mandatory)][version]$PreviousVersion,
     [Parameter(Mandatory)][string]$Installer,
     [Parameter(Mandatory)][string]$Version
 )
@@ -40,9 +41,10 @@ function Assert-InstalledVersion($ExpectedVersion) {
 }
 
 function Invoke-TestAutomaticUpdate {
-    $testUpdater = Join-Path $installDirectory 'TestUpdateAgentMeter.ps1'
+    $testUpdater = Join-Path $logDirectory 'TestUpdateAgentMeter.ps1'
     $feed = Join-Path $logDirectory 'test-update-feed.json'
     $publicKeyPath = Join-Path $installDirectory 'update-public.xml'
+    $installedPublicKey = [IO.File]::ReadAllBytes($publicKeyPath)
     $rsa = [Security.Cryptography.RSACryptoServiceProvider]::new(2048)
     $rsa.PersistKeyInCsp = $false
     try {
@@ -57,8 +59,10 @@ function Invoke-TestAutomaticUpdate {
         [IO.File]::WriteAllText($publicKeyPath, $rsa.ToXmlString($false))
     } finally { $rsa.Dispose() }
 
-    $fixtureDownload = @'
-function Copy-TestReleaseAsset([switch]$UseBasicParsing, $TimeoutSec, $Uri, $OutFile) {
+    $fixtureRunner = @'
+param([string]$UpdaterPath)
+
+function Invoke-WebRequest([switch]$UseBasicParsing, $TimeoutSec, $Uri, $OutFile) {
     if ($Uri.EndsWith('/agentmeter-update.json')) {
         Copy-Item -LiteralPath $env:AGENTMETER_TEST_UPDATE_FEED -Destination $OutFile
     } elseif ($Uri.EndsWith('/AgentMeter-Taskbar-Setup-v' + $env:AGENTMETER_TEST_VERSION + '.exe')) {
@@ -67,22 +71,27 @@ function Copy-TestReleaseAsset([switch]$UseBasicParsing, $TimeoutSec, $Uri, $Out
         throw "Unexpected update URL: $Uri"
     }
 }
+
+& $UpdaterPath
+exit $LASTEXITCODE
 '@
     $env:AGENTMETER_TEST_UPDATE_FEED = $feed
     $env:AGENTMETER_TEST_INSTALLER = (Resolve-Path -LiteralPath $Installer).Path
     $env:AGENTMETER_TEST_VERSION = $Version
-    $productionUpdater = Get-Content -LiteralPath (Join-Path $installDirectory 'UpdateAgentMeter.ps1') -Raw
-    $testSource = $productionUpdater.Replace('Invoke-WebRequest', 'Copy-TestReleaseAsset').Replace(
-        '$ErrorActionPreference = ''Stop''', '$ErrorActionPreference = ''Stop''' + [Environment]::NewLine + $fixtureDownload)
-    Set-Content -LiteralPath $testUpdater -Value $testSource -Encoding UTF8
+    $updaterPath = Join-Path $installDirectory 'UpdateAgentMeter.ps1'
+    Set-Content -LiteralPath $testUpdater -Value $fixtureRunner -Encoding UTF8
     try {
         $powershell = Join-Path $PSHOME 'powershell.exe'
-        $options = '-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'Bypass', '-File', ('"' + $testUpdater + '"')
+        $options = '-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'Bypass',
+            '-File', ('"' + $testUpdater + '"'), '-UpdaterPath', ('"' + $updaterPath + '"')
         if ((Start-TestSetup $powershell $options) -ne 0) {
             Get-Content -LiteralPath (Join-Path $installDirectory 'updates.log') -ErrorAction SilentlyContinue
             throw 'The signed background update did not complete.'
         }
-    } finally { Remove-Item -LiteralPath $testUpdater }
+    } finally {
+        [IO.File]::WriteAllBytes($publicKeyPath, $installedPublicKey)
+        [IO.File]::Delete($testUpdater)
+    }
 }
 
 $options = '/VERYSILENT', '/SUPPRESSMSGBOXES', '/NORESTART', '/SP-'
@@ -102,7 +111,7 @@ try {
     if ((Start-TestSetup $PreviousInstaller ($options + '/MERGETASKS=claudecode' + "/LOG=$logDirectory\install.log")) -ne 0) {
         throw 'Fresh setup failed.'
     }
-    Assert-InstalledVersion '0.1.99'
+    Assert-InstalledVersion ($PreviousVersion.ToString())
     if (!(Get-Content -LiteralPath $claudeSettings -Raw | ConvertFrom-Json).statusLine.command) {
         throw 'The selected Claude Code integration was not installed.'
     }
@@ -110,6 +119,17 @@ try {
         throw 'Setup did not create both per-user tasks.'
     }
     $initialUninstall = (Get-ItemProperty -LiteralPath $uninstallKey).UninstallString
+    Invoke-TestAutomaticUpdate
+    Assert-InstalledVersion $Version
+    $collectorLauncher = Join-Path $installDirectory "AgentMeterCollector-$Version.exe"
+    $collectorAction = (Get-ScheduledTask -TaskName $collectorTask).Actions
+    if ($collectorAction.Execute -ne $collectorLauncher -or (Test-Path -LiteralPath (Join-Path $installDirectory 'RefreshQuota.vbs'))) {
+        throw 'Upgrade did not migrate the collector to the windowless executable.'
+    }
+    $collectorRun = Start-Process -FilePath $collectorLauncher -WindowStyle Hidden -Wait -PassThru
+    if ($collectorRun.ExitCode -ne 0 -or !(Test-Path -LiteralPath (Join-Path $installDirectory 'data.json'))) {
+        throw 'The packaged collector could not publish a quota snapshot.'
+    }
     Invoke-TestAutomaticUpdate
     Assert-InstalledVersion $Version
     if ((Get-ItemProperty -LiteralPath $uninstallKey).UninstallString -ne $initialUninstall) {

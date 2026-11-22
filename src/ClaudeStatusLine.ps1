@@ -20,6 +20,7 @@ $summary = foreach ($period in $ClaudeQuotaPeriods) {
     $resetAt = ConvertFrom-UnixTime $statusWindow.resets_at
     $quota = ConvertTo-QuotaWindow $statusWindow.used_percentage $resetAt
     if ($quota) {
+        $quota.observed_at = $snapshot.observed_at
         $snapshot[$period.Field] = $quota
         '{0}: {1}%' -f $period.Label, $quota.percent
     }
@@ -34,12 +35,28 @@ try {
     if (!$writerLock) { return }
     try {
         $snapshotPath = Join-Path $DataDirectory 'claude-usage.json'
-        $previousObservation = $null
-        try { $previousObservation = ConvertTo-QuotaDate (Read-QuotaJson $snapshotPath).observed_at }
+        $previous = $null
+        try { $previous = Read-QuotaJson $snapshotPath }
         catch { }
-        if (!$previousObservation -or $observedAt -ge $previousObservation) {
-            Write-QuotaJson $snapshotPath $snapshot
+        $previousSnapshotTime = ConvertTo-QuotaDate $previous.observed_at
+        if ($previousSnapshotTime -gt $observedAt) {
+            $snapshot.observed_at = $previousSnapshotTime.ToString('o', $invariantCulture)
         }
+        foreach ($period in $ClaudeQuotaPeriods) {
+            $field = $period.Field
+            $previousWindow = $previous.$field
+            $previousWindowTime = ConvertTo-QuotaDate $previousWindow.observed_at
+            if (!$previousWindowTime) { $previousWindowTime = $previousSnapshotTime }
+            if (!$previousWindow -or !$previousWindowTime -or
+                ($snapshot[$field] -and $previousWindowTime -le $observedAt)) { continue }
+
+            $savedWindow = ConvertTo-QuotaWindow $previousWindow.percent $previousWindow.reset
+            if ($savedWindow) {
+                $savedWindow.observed_at = $previousWindowTime.ToString('o', $invariantCulture)
+                $snapshot[$field] = $savedWindow
+            }
+        }
+        Write-QuotaJson $snapshotPath $snapshot
     }
     finally { $writerLock.Dispose() }
 } catch [IO.IOException] { Write-Warning 'AgentMeter could not save the Claude Code quota snapshot.' }

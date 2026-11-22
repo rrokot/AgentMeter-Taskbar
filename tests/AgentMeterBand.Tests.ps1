@@ -1,7 +1,9 @@
 Describe 'AgentMeterBand' {
     BeforeAll {
-        $toolbarSourcePath = Join-Path $PSScriptRoot '..\src\AgentMeterBand.cs'
-        Add-Type -Path $toolbarSourcePath -ReferencedAssemblies System.Drawing.dll, System.Windows.Forms.dll, System.Web.Extensions.dll -ErrorAction Stop
+        $version = (Get-Content -LiteralPath (Join-Path $PSScriptRoot '..\VERSION') -Raw).Trim()
+        $toolbarDll = Join-Path $TestDrive "AgentMeterBand-$version.dll"
+        & (Join-Path $PSScriptRoot '..\packaging\Build-Toolbar.ps1') -Version $version -OutputPath $toolbarDll
+        [void][Reflection.Assembly]::Load([IO.File]::ReadAllBytes($toolbarDll))
     }
 
     It 'exposes IPersist through QueryInterface' {

@@ -20,7 +20,7 @@ $installer = Join-Path $AssetDirectory $installerName
 $checksum = Join-Path $AssetDirectory "AgentMeter-Taskbar-Setup-$tag.sha256"
 $feed = Join-Path $AssetDirectory 'agentmeter-update.json'
 
-. (Join-Path $PSScriptRoot 'UpdateAgentMeter.ps1')
+. (Join-Path $PSScriptRoot 'UpdateManifest.ps1')
 $publicKey = Get-Content -LiteralPath (Join-Path $PSScriptRoot 'update-public.xml') -Raw
 $manifest = Read-VerifiedUpdate (Get-Content -LiteralPath $feed -Raw) $publicKey ([version]'0.0.0')
 if (!$manifest -or $manifest.version -cne $version) { throw 'The update manifest does not match VERSION.' }

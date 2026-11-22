@@ -20,7 +20,7 @@ $productRegistryPath = 'HKCU:\Software\AgentMeterTaskbar'
 $toolbarRegistryPath = 'HKCU:\Software\Classes\CLSID\{EA143E8E-217B-4B86-925B-37EA04848915}'
 $serverRegistryPath = Join-Path $toolbarRegistryPath 'InprocServer32'
 $deskBandCategoryId = '{00021492-0000-0000-C000-000000000046}'
-$collectorLauncher = Join-Path $installDirectory 'RefreshQuota.vbs'
+$collectorLauncher = Join-Path $installDirectory "AgentMeterCollector-$ProductVersion.exe"
 $statusLine = Join-Path $installDirectory 'ClaudeStatusLine.ps1'
 $managedClaudeSettings = (Get-ItemProperty -LiteralPath $productRegistryPath -Name ClaudeSettingsPath -ErrorAction SilentlyContinue).ClaudeSettingsPath
 . (Join-Path $installDirectory 'ClaudeConnection.ps1')
@@ -52,18 +52,21 @@ $previousServer = Get-ItemProperty -LiteralPath $serverRegistryPath -ErrorAction
 $previousCollector = Get-ScheduledTask -TaskName $collectorTaskName -TaskPath $taskPath -ErrorAction SilentlyContinue
 $previousUpdater = Get-ScheduledTask -TaskName $updateTaskName -TaskPath $taskPath -ErrorAction SilentlyContinue
 $principal = New-ScheduledTaskPrincipal -UserId $user.Name -LogonType Interactive -RunLevel Limited
-$collectorAdded = $false
+$collectorChanged = $false
+$previousCollectorXml = $null
 $updaterAdded = $false
 
 try {
-    if (!$previousCollector) {
-        $scriptHost = Join-Path $env:WINDIR 'System32\wscript.exe'
-        $action = New-ScheduledTaskAction -Execute $scriptHost -Argument ('//B //NoLogo "' + $collectorLauncher + '"') -WorkingDirectory $installDirectory
+    if (!$previousCollector -or $previousCollector.Actions.Execute -ne $collectorLauncher) {
+        if ($previousCollector) {
+            $previousCollectorXml = Export-ScheduledTask -TaskName $collectorTaskName -TaskPath $taskPath
+        }
+        $action = New-ScheduledTaskAction -Execute $collectorLauncher -WorkingDirectory $installDirectory
         $interval = New-TimeSpan -Minutes 1
         $trigger = New-ScheduledTaskTrigger -Once -At (Get-Date).Add($interval) -RepetitionInterval $interval
         $settings = New-ScheduledTaskSettingsSet -MultipleInstances IgnoreNew -StartWhenAvailable -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries -ExecutionTimeLimit (New-TimeSpan -Seconds 55)
-        Register-ScheduledTask -TaskName $collectorTaskName -TaskPath $taskPath -Principal $principal -Action $action -Trigger $trigger -Settings $settings | Out-Null
-        $collectorAdded = $true
+        Register-ScheduledTask -TaskName $collectorTaskName -TaskPath $taskPath -Principal $principal -Action $action -Trigger $trigger -Settings $settings -Force | Out-Null
+        $collectorChanged = $true
     }
 
     if ($AutomaticUpdates -and !$previousUpdater) {
@@ -106,7 +109,11 @@ try {
         Remove-Item -LiteralPath $toolbarRegistryPath -Recurse -ErrorAction SilentlyContinue
     }
     if ($updaterAdded) { Remove-AgentMeterTask $updateTaskName }
-    if ($collectorAdded) { Remove-AgentMeterTask $collectorTaskName }
+    if ($collectorChanged) {
+        if ($previousCollectorXml) {
+            Register-ScheduledTask -TaskName $collectorTaskName -TaskPath $taskPath -Xml $previousCollectorXml -Force | Out-Null
+        } else { Remove-AgentMeterTask $collectorTaskName }
+    }
     throw
 }
 
@@ -133,7 +140,12 @@ if ($legacyTask -and $legacyTask.Principal.UserId -in $user.Name, $user.User.Val
     try { Remove-AgentMeterTask $legacyTaskName }
     catch { Write-Warning 'Could not remove the previous AgentMeter collector task.' }
 }
+Remove-Item -LiteralPath (Join-Path $installDirectory 'RefreshQuota.vbs') -ErrorAction SilentlyContinue
+Remove-Item -LiteralPath (Join-Path $installDirectory 'claude-cache.json') -ErrorAction SilentlyContinue
 Get-ChildItem -LiteralPath $installDirectory -Filter 'AgentMeterBand-*.dll' -File |
     Where-Object { $_.FullName -ne $toolbarDll } |
+    Remove-Item -ErrorAction SilentlyContinue
+Get-ChildItem -LiteralPath $installDirectory -Filter 'AgentMeterCollector-*.exe' -File |
+    Where-Object { $_.FullName -ne $collectorLauncher } |
     Remove-Item -ErrorAction SilentlyContinue
 Start-ScheduledTask -TaskName $collectorTaskName -TaskPath $taskPath -ErrorAction SilentlyContinue

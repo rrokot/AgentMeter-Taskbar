@@ -184,7 +184,29 @@ Describe 'Claude Code status-line quotas' {
         $replacement = '{"rate_limits":{"seven_day":{"used_percentage":37}}}'
         $line = Invoke-TestStatusLine $replacement $dataDirectory -Quiet
         $line | Should BeNullOrEmpty
-        (Read-QuotaJson $snapshotPath).seven_day.percent | Should Be 37
+        $updatedSnapshot = Read-QuotaJson $snapshotPath
+        $updatedSnapshot.seven_day.percent | Should Be 37
+        $updatedSnapshot.five_hour.percent | Should Be 14
+        $updatedSnapshot.five_hour.observed_at | Should Be $snapshot.five_hour.observed_at
+    }
+
+    It 'keeps a previous period without extending its freshness during a partial update' {
+        $dataDirectory = New-TestDirectory
+        $snapshotPath = Join-Path $dataDirectory 'claude-usage.json'
+        $previousTime = [DateTimeOffset]::UtcNow.AddMinutes(-20)
+        Write-QuotaJson $snapshotPath @{
+            observed_at = $previousTime.ToString('o')
+            five_hour = @{ percent = 14 }
+        }
+        Invoke-TestStatusLine '{"rate_limits":{"seven_day":{"used_percentage":37}}}' $dataDirectory -Quiet | Should BeNullOrEmpty
+        $now = [DateTimeOffset]::UtcNow
+        $result = Get-ClaudeStatusLineLimits $snapshotPath $now
+        $output = @{}
+        Add-Limits $output 'claude' $result.limits $result.message $now
+        $output.claude_c1_pct | Should Be ''
+        $output.claude_c1_last_pct | Should Be '14'
+        $output.claude_c1_observed_at | Should Be ($previousTime.ToString('o'))
+        $output.claude_c2_pct | Should Be '37'
     }
 
     It 'keeps the last snapshot when a later payload lacks quota fields' {

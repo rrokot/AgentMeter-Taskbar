@@ -44,10 +44,11 @@ Source: "{#BuildDirectory}\AgentMeterBand-{#AppVersion}.dll"; DestDir: "{app}"; 
 Source: "..\src\QuotaData.ps1"; DestDir: "{app}"; Flags: ignoreversion
 Source: "..\src\ClaudeStatusLine.ps1"; DestDir: "{app}"; Flags: ignoreversion
 Source: "..\src\RefreshQuota.ps1"; DestDir: "{app}"; Flags: ignoreversion
-Source: "..\src\RefreshQuota.vbs"; DestDir: "{app}"; Flags: ignoreversion
+Source: "{#BuildDirectory}\AgentMeterCollector-{#AppVersion}.exe"; DestDir: "{app}"; Flags: ignoreversion onlyifdoesntexist uninsrestartdelete
 Source: "ManageInstallation.ps1"; DestDir: "{app}"; Flags: ignoreversion
 Source: "ClaudeConnection.ps1"; DestDir: "{app}"; Flags: ignoreversion
 Source: "UpdateAgentMeter.ps1"; DestDir: "{app}"; Flags: ignoreversion
+Source: "UpdateManifest.ps1"; DestDir: "{app}"; Flags: ignoreversion
 Source: "update-public.xml"; DestDir: "{app}"; Flags: ignoreversion
 Source: "..\LICENSE"; DestDir: "{app}"
 Source: "..\NOTICE-AgentMeter.txt"; DestDir: "{app}"
@@ -60,6 +61,8 @@ Name: "{group}\Uninstall AgentMeter Taskbar"; Filename: "{uninstallexe}"
 [UninstallDelete]
 Type: files; Name: "{app}\data.json"
 Type: files; Name: "{app}\claude-usage.json"
+Type: files; Name: "{app}\claude-cache.json"
+Type: files; Name: "{app}\RefreshQuota.vbs"
 Type: files; Name: "{app}\collector.lock"
 Type: files; Name: "{app}\claude-usage.lock"
 Type: files; Name: "{app}\updates.lock"

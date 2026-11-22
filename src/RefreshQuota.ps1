@@ -74,13 +74,14 @@ function Get-ClaudeStatusLineLimits($SnapshotPath, [DateTimeOffset]$Now) {
     if (!(Test-Path -LiteralPath $SnapshotPath -PathType Leaf)) { return $result }
 
     $snapshot = Read-QuotaJson $SnapshotPath
-    $observedAt = ConvertTo-QuotaDate $snapshot.observed_at
+    $snapshotTime = ConvertTo-QuotaDate $snapshot.observed_at
     $result.message = 'Waiting for current Claude usage. Open Usage in Claude Desktop or run a turn in Claude Code.'
-    if (!$observedAt -or $observedAt -gt $Now) { return $result }
-
     for ($index = 0; $index -lt $ClaudeQuotaPeriods.Count; $index++) {
         $period = $ClaudeQuotaPeriods[$index]
         $rawWindow = $snapshot.($period.Field)
+        $observedAt = ConvertTo-QuotaDate $rawWindow.observed_at
+        if (!$observedAt) { $observedAt = $snapshotTime }
+        if (!$observedAt -or $observedAt -gt $Now) { continue }
         $result.limits[$index] = ConvertTo-ClaudeQuotaObservation $rawWindow.percent $rawWindow.reset $observedAt
     }
     if ($result.limits[0] -or $result.limits[1]) { $result.message = '' }

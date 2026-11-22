@@ -44,11 +44,12 @@ jobs:
         run: |
           $ErrorActionPreference = 'Stop'
           $version = (Get-Content -LiteralPath VERSION -Raw).Trim()
-          .\packaging\Sign-UpdateFeed.ps1 -Version $version -Installer ".\dist\AgentMeter-Taskbar-Setup-v$version.exe" -UseEnvironmentKey
+          .\packaging\Sign-UpdateFeed.ps1 -Version $version -Installer ".\dist\AgentMeter-Taskbar-Setup-v$version.exe"
       - name: Verify with the installed updater's public key
         shell: powershell
         run: |
-          . .\packaging\UpdateAgentMeter.ps1
+          $ErrorActionPreference = 'Stop'
+          . .\packaging\UpdateManifest.ps1
           $version = (Get-Content -LiteralPath VERSION -Raw).Trim()
           $publicKey = Get-Content -LiteralPath .\packaging\update-public.xml -Raw
           $manifest = Read-VerifiedUpdate (Get-Content -LiteralPath .\dist\agentmeter-update.json -Raw) $publicKey ([version]'0.0.0')

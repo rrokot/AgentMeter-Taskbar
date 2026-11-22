@@ -1,13 +1,9 @@
-[CmdletBinding(DefaultParameterSetName='Local')]
 param(
     [Parameter(Mandatory)][ValidatePattern('^\d+\.\d+\.\d+$')][string]$Version,
-    [Parameter(Mandatory)][string]$Installer,
-    [Parameter(ParameterSetName='Local')][string]$SigningKey = (Join-Path $env:LOCALAPPDATA 'AgentMeterReleaseKeys\update-signing-key.dpapi'),
-    [Parameter(Mandatory, ParameterSetName='Environment')][switch]$UseEnvironmentKey
+    [Parameter(Mandatory)][string]$Installer
 )
 
 $ErrorActionPreference = 'Stop'
-Add-Type -AssemblyName System.Security
 $installerFile = Get-Item -LiteralPath $Installer
 if ($installerFile.Name -ne "AgentMeter-Taskbar-Setup-v$Version.exe") {
     throw 'Installer filename does not match the release version.'
@@ -23,15 +19,11 @@ $rsa = [Security.Cryptography.RSACryptoServiceProvider]::new()
 $rsa.PersistKeyInCsp = $false
 $privateKey = $null
 try {
-    if ($UseEnvironmentKey) {
-        if ([string]::IsNullOrWhiteSpace($env:AGENTMETER_UPDATE_SIGNING_KEY)) {
-            throw 'The release-signing environment has no update signing key.'
-        }
-        $privateKey = [Convert]::FromBase64String($env:AGENTMETER_UPDATE_SIGNING_KEY)
-        Remove-Item Env:AGENTMETER_UPDATE_SIGNING_KEY
-    } else {
-        $privateKey = [Security.Cryptography.ProtectedData]::Unprotect([IO.File]::ReadAllBytes($SigningKey), $null, 'CurrentUser')
+    if ([string]::IsNullOrWhiteSpace($env:AGENTMETER_UPDATE_SIGNING_KEY)) {
+        throw 'The release-signing environment has no update signing key.'
     }
+    $privateKey = [Convert]::FromBase64String($env:AGENTMETER_UPDATE_SIGNING_KEY)
+    Remove-Item Env:AGENTMETER_UPDATE_SIGNING_KEY
     $rsa.FromXmlString([Text.Encoding]::UTF8.GetString($privateKey))
     if ($rsa.ToXmlString($false) -ne $publicKey) { throw 'Private key does not match the installed update trust key.' }
     $sha256Oid = [Security.Cryptography.CryptoConfig]::MapNameToOID('SHA256')

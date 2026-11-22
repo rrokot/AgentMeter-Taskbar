@@ -1,30 +1,8 @@
 param([switch]$Interactive)
 
 $ErrorActionPreference = 'Stop'
-
-function Read-VerifiedUpdate($Envelope, [string]$PublicKey, [version]$InstalledVersion) {
-    $feed = ConvertFrom-Json -InputObject $Envelope
-    $payload = [Convert]::FromBase64String($feed.payload)
-    $signature = [Convert]::FromBase64String($feed.signature)
-    $rsa = [Security.Cryptography.RSACryptoServiceProvider]::new()
-    $rsa.PersistKeyInCsp = $false
-    try {
-        $rsa.FromXmlString($PublicKey)
-        $sha256Oid = [Security.Cryptography.CryptoConfig]::MapNameToOID('SHA256')
-        if (!$rsa.VerifyData($payload, $sha256Oid, $signature)) { throw 'Update signature verification failed.' }
-    } finally { $rsa.Dispose() }
-
-    $release = ConvertFrom-Json -InputObject ([Text.Encoding]::UTF8.GetString($payload))
-    if ($release.schema -ne 1 -or $release.version -notmatch '^\d+\.\d+\.\d+$' -or
-        $release.sha256 -notmatch '^[a-f0-9]{64}$') { throw 'Unsupported update manifest.' }
-    if ([version]$release.version -gt $InstalledVersion) { return $release }
-}
-
-function Assert-UpdateInstallerHash($Path, $ExpectedHash) {
-    if ((Get-FileHash -LiteralPath $Path -Algorithm SHA256).Hash -ne $ExpectedHash) {
-        throw 'Downloaded installer checksum verification failed.'
-    }
-}
+. (Join-Path $PSScriptRoot 'QuotaData.ps1')
+. (Join-Path $PSScriptRoot 'UpdateManifest.ps1')
 
 function Show-UpdateMessage([string]$Message) {
     if ($Interactive) {
@@ -32,9 +10,6 @@ function Show-UpdateMessage([string]$Message) {
         [void][Windows.Forms.MessageBox]::Show($Message, 'AgentMeter Taskbar')
     }
 }
-
-if ($MyInvocation.InvocationName -eq '.') { return }
-. (Join-Path $PSScriptRoot 'QuotaData.ps1')
 
 $updateLock = Open-QuotaWriterLock (Join-Path $PSScriptRoot 'updates.lock')
 if (!$updateLock) {
@@ -90,7 +65,8 @@ try {
     foreach ($download in $feedPath, $installerPath) {
         if (Test-Path -LiteralPath $download) { Remove-Item -LiteralPath $download -ErrorAction SilentlyContinue }
     }
-    if (Test-Path -LiteralPath $downloadDirectory) {
-        [IO.Directory]::Delete($downloadDirectory)
-    }
+    try {
+        if (Test-Path -LiteralPath $downloadDirectory) { [IO.Directory]::Delete($downloadDirectory) }
+    } catch [IO.IOException] { }
+    catch [UnauthorizedAccessException] { }
 }

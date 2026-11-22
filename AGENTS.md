@@ -8,7 +8,7 @@ Run the tests in Windows PowerShell 5.1 with Pester 3.4. They compile the toolba
 powershell.exe -NoProfile -Command "Invoke-Pester .\tests -EnableExit"
 ```
 
-Windows CI also tests installation, upgrades, update preferences, and uninstall.
+Windows CI also tests installation, upgrades from a pinned public release, update preferences, and uninstall.
 
 ## Releasing product changes
 

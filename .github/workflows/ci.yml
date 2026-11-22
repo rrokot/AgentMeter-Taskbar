@@ -41,9 +41,14 @@ jobs:
         run: |
           $ErrorActionPreference = 'Stop'
           $version = (Get-Content -LiteralPath VERSION -Raw).Trim()
-          & .\packaging\Build-Installer.ps1 -Version '0.1.99' -InnoCompiler $env:INNO_COMPILER -OutputDirectory .\dist\test
+          $previousVersion = '0.2.2'
+          $previousSetup = Join-Path $env:RUNNER_TEMP "AgentMeter-Taskbar-Setup-v$previousVersion.exe"
+          $previousRelease = "https://github.com/rrokot/AgentMeter-Taskbar/releases/download/v$previousVersion"
+          Invoke-WebRequest -UseBasicParsing -Uri "$previousRelease/AgentMeter-Taskbar-Setup-v$previousVersion.exe" -OutFile $previousSetup
+          $previousHash = '9ab36dcb94daaad3f5b257882ced6dc63a3c95606b32f0868a5b4f5a97af284c'
+          if ((Get-FileHash -LiteralPath $previousSetup -Algorithm SHA256).Hash -ne $previousHash) { throw 'Upgrade fixture checksum mismatch.' }
           & .\packaging\Build-Installer.ps1 -Version $version -InnoCompiler $env:INNO_COMPILER
-          & .\packaging\Test-Installer.ps1 -PreviousInstaller .\dist\test\AgentMeter-Taskbar-Setup-v0.1.99.exe -Installer ".\dist\AgentMeter-Taskbar-Setup-v$version.exe" -Version $version
+          & .\packaging\Test-Installer.ps1 -PreviousInstaller $previousSetup -PreviousVersion $previousVersion -Installer ".\dist\AgentMeter-Taskbar-Setup-v$version.exe" -Version $version
       - uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6.0.0
         with:
           name: windows-installer
