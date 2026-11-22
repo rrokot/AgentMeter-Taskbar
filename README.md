@@ -1,6 +1,6 @@
 # AgentMeter Taskbar
 
-Windows taskbar toolbar for Claude Code and Codex usage limits. It shows the five-hour and weekly windows for each service and reveals usage, reset times, and the running toolbar version on hover.
+Windows taskbar toolbar for Claude and Codex usage limits. It shows the five-hour and weekly windows for each service and reveals usage, available reset times, and the running toolbar version on hover.
 
 [Документация на русском](docs/README.ru.md)
 
@@ -15,6 +15,8 @@ Use Windows 11 x64 with the classic taskbar enabled in StartAllBack.
 3. Right-click the taskbar and choose **Toolbars → AgentMeter Quotas**. If it is missing from the menu, sign out of Windows and sign back in.
 
 Codex quotas appear once a local Codex CLI session has recorded rate limits. The collector reads the latest matching entry in the session logs under `CODEX_HOME` or `%USERPROFILE%\.codex`.
+
+AgentMeter can read usage saved by the Windows Claude Desktop app. Open Claude Desktop and allow up to a minute for the panel to update. If Claude has yet to save a recent sample, open **Settings → Usage** in the app.
 
 ### Claude Code setup
 
@@ -38,7 +40,7 @@ Complete a turn in Claude Code and allow up to one minute for the taskbar to upd
 
 AgentMeter adapts to both taskbar orientations. On a horizontal taskbar, each service has two stacked progress tracks with the five-hour quota above the weekly quota. On a vertical taskbar, the bars are ordered Claude Code 5h, Claude Code 7d, Codex 5h, Codex 7d. A gray bar means that usage is unavailable. When both windows increase, the weekly increase takes priority in the animation.
 
-The collector runs once a minute under your Windows user account. Claude Code supplies its quotas through the status line, and AgentMeter reads Codex CLI session files on the same machine. The saved data contains quota values, timestamps, and display status.
+The collector runs once a minute under your Windows user account. It reads the Claude Code status line, Claude Desktop usage history, and Codex CLI session files on the same machine. When current Claude Code usage is unavailable, AgentMeter uses a Claude Desktop sample up to 15 minutes old. Desktop history supplies percentages alone. The panel displays reset times when Claude Code provides them.
 
 ## Update or uninstall
 

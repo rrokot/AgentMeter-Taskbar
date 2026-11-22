@@ -3,6 +3,8 @@ param([string]$DataDirectory = $PSScriptRoot)
 $ErrorActionPreference = 'Stop'
 . (Join-Path $PSScriptRoot 'QuotaData.ps1')
 
+$maximumClaudeQuotaAgeWithoutReset = [TimeSpan]::FromMinutes(15)
+
 function Get-CodexLimits {
     $codexHome = if ($env:CODEX_HOME) { $env:CODEX_HOME } else { Join-Path $env:USERPROFILE '.codex' }
     $recentSessionLogCount = 10
@@ -59,16 +61,15 @@ function Get-CodexLimits {
 function Get-ClaudeStatusLineLimits($SnapshotPath, [DateTimeOffset]$Now) {
     $result = @{
         limits = @($null, $null)
-        message = 'Enable the AgentMeter status line in Claude Code and run a turn.'
+        message = 'Open Usage in Claude Desktop or enable the AgentMeter status line in Claude Code.'
     }
     if (!(Test-Path -LiteralPath $SnapshotPath -PathType Leaf)) { return $result }
 
     $snapshot = Read-QuotaJson $SnapshotPath
     $observedAt = ConvertTo-QuotaDate $snapshot.observed_at
-    $result.message = 'Waiting for current Claude Code quota data. Run a turn to refresh.'
+    $result.message = 'Waiting for current Claude usage. Open Usage in Claude Desktop or run a turn in Claude Code.'
     if (!$observedAt -or $observedAt -gt $Now) { return $result }
 
-    $maximumAgeWithoutReset = [TimeSpan]::FromMinutes(15)
     for ($index = 0; $index -lt $ClaudeQuotaPeriods.Count; $index++) {
         $period = $ClaudeQuotaPeriods[$index]
         $rawWindow = $snapshot.($period.Field)
@@ -76,11 +77,48 @@ function Get-ClaudeStatusLineLimits($SnapshotPath, [DateTimeOffset]$Now) {
         if (!$quota) { continue }
         $resetAt = ConvertTo-QuotaDate $quota.reset
         if ($resetAt -and $resetAt -le $Now) { continue }
-        if (!$resetAt -and ($Now - $observedAt) -gt $maximumAgeWithoutReset) { continue }
+        if (!$resetAt -and ($Now - $observedAt) -gt $maximumClaudeQuotaAgeWithoutReset) { continue }
         $result.limits[$index] = $quota
     }
     if ($result.limits[0] -or $result.limits[1]) { $result.message = '' }
     return $result
+}
+
+function Get-ClaudeDesktopLimits($HistoryPath, [DateTimeOffset]$Now) {
+    if (!(Test-Path -LiteralPath $HistoryPath -PathType Leaf)) { return }
+    $history = Read-QuotaJson $HistoryPath
+    if ($history.version -ne 2 -or $history.samples -isnot [array]) { return }
+
+    $earliestSampleTime = ($Now - $maximumClaudeQuotaAgeWithoutReset).ToUnixTimeMilliseconds()
+    $latestSampleTime = $Now.ToUnixTimeMilliseconds()
+    $newestSampleTime = $earliestSampleTime
+    $newestSample = $null
+    foreach ($sample in $history.samples) {
+        $sampleTime = 0L
+        if (![long]::TryParse([string]$sample.t, [ref]$sampleTime) -or
+            $sampleTime -lt $newestSampleTime -or $sampleTime -gt $latestSampleTime) { continue }
+        $newestSampleTime = $sampleTime
+        $newestSample = $sample
+    }
+    if (!$newestSample) { return }
+
+    # Desktop history stores percentages with no reset timestamps.
+    $fiveHour = ConvertTo-QuotaWindow $newestSample.u.fh $null
+    $weekly = ConvertTo-QuotaWindow $newestSample.u.sd $null
+    if ($fiveHour -or $weekly) {
+        return @{ limits = @($fiveHour, $weekly); message = '' }
+    }
+}
+
+function Get-ClaudeLimits($StatusLinePath, $DesktopHistoryPath, [DateTimeOffset]$Now) {
+    try { $statusLine = Get-ClaudeStatusLineLimits $StatusLinePath $Now }
+    catch { $statusLine = @{ limits = @($null, $null); message = 'Claude Code status-line data could not be read.' } }
+    if ($statusLine.limits[0] -or $statusLine.limits[1]) { return $statusLine }
+
+    try { $desktop = Get-ClaudeDesktopLimits $DesktopHistoryPath $Now }
+    catch { return $statusLine }
+    if ($desktop) { return $desktop }
+    return $statusLine
 }
 
 function Add-Limits($Output, $Provider, $Limits, $Message, $Now) {
@@ -115,8 +153,8 @@ try {
     try { $codexLimitsByPeriod = Get-CodexLimits }
     catch { $codexMessage = 'Codex session logs could not be read.' }
     $now = [DateTimeOffset]::UtcNow
-    try { $claudeResult = Get-ClaudeStatusLineLimits (Join-Path $DataDirectory 'claude-usage.json') $now }
-    catch { $claudeResult = @{ limits = @($null, $null); message = 'Claude Code status-line data could not be read.' } }
+    $desktopHistoryPath = Join-Path ([Environment]::GetFolderPath('ApplicationData')) 'Claude\plan-usage-history.json'
+    $claudeResult = Get-ClaudeLimits (Join-Path $DataDirectory 'claude-usage.json') $desktopHistoryPath $now
 
     $snapshot = @{ updated_at = $now.ToString('o', $invariantCulture) }
     Add-Limits $snapshot 'codex' @($codexLimitsByPeriod['5h'], $codexLimitsByPeriod['7d']) $codexMessage $now

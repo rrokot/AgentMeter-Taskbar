@@ -199,7 +199,7 @@ Describe 'Claude Code status-line quotas' {
         $snapshotPath = Join-Path (New-TestDirectory) 'claude-usage.json'
         $result = Get-ClaudeStatusLineLimits $snapshotPath ([DateTimeOffset]::UtcNow)
         $result.limits[0] | Should BeNullOrEmpty
-        $result.message | Should Match 'Enable the AgentMeter status line'
+        $result.message | Should Match 'Open Usage in Claude Desktop'
     }
 
     It 'expires each window at its own reset and drops old values without one' {
@@ -220,6 +220,57 @@ Describe 'Claude Code status-line quotas' {
         }
         $result = Get-ClaudeStatusLineLimits $snapshotPath $now
         $result.limits[0] | Should BeNullOrEmpty
-        $result.message | Should Match 'Waiting for current Claude Code quota data'
+        $result.message | Should Match 'Waiting for current Claude usage'
+    }
+}
+
+Describe 'Claude Desktop quota history' {
+    $now = [DateTimeOffset]::Parse('2026-11-22T11:45:00Z')
+
+    It 'uses the latest recent sample and keeps zero usage' {
+        $directory = New-TestDirectory
+        $historyPath = Join-Path $directory 'plan-usage-history.json'
+        Write-QuotaJson $historyPath @{ version = 2; samples = @(
+            @{ t = $now.AddMinutes(-1).ToUnixTimeMilliseconds(); u = @{ fh = 2; sd = 0; xu = 25 } }
+            @{ t = $now.AddMinutes(-5).ToUnixTimeMilliseconds(); u = @{ fh = 50; sd = 60 } }
+            @{ t = $now.AddMinutes(5).ToUnixTimeMilliseconds(); u = @{ fh = 80; sd = 90 } }
+        ) }
+        $result = Get-ClaudeLimits (Join-Path $directory 'claude-usage.json') $historyPath $now
+        $output = @{}
+        Add-Limits $output 'claude' $result.limits $result.message $now
+        $output.claude_status | Should Be 'ok'
+        $output.claude_c1_pct | Should Be '2'
+        $output.claude_c2_pct | Should Be '0'
+        $output.claude_c1_reset_at | Should Be ''
+    }
+
+    It 'does not display stale history or samples from unknown formats' {
+        $historyPath = Join-Path (New-TestDirectory) 'plan-usage-history.json'
+        $oldSample = @{ t = $now.AddMinutes(-16).ToUnixTimeMilliseconds(); u = @{ fh = 10 } }
+        Write-QuotaJson $historyPath @{ version = 2; samples = @($oldSample) }
+        Get-ClaudeDesktopLimits $historyPath $now | Should BeNullOrEmpty
+        $recentSample = @{ t = $now.AddMinutes(-1).ToUnixTimeMilliseconds(); u = @{ fh = 10 } }
+        Write-QuotaJson $historyPath @{ version = 3; samples = @($recentSample) }
+        Get-ClaudeDesktopLimits $historyPath $now | Should BeNullOrEmpty
+    }
+
+    It 'prefers valid status-line data and falls back if its file is unreadable' {
+        $directory = New-TestDirectory
+        $statusLinePath = Join-Path $directory 'claude-usage.json'
+        $historyPath = Join-Path $directory 'plan-usage-history.json'
+        $sample = @{ t = $now.AddMinutes(-1).ToUnixTimeMilliseconds(); u = @{ fh = 12; sd = 34 } }
+        Write-QuotaJson $historyPath @{ version = 2; samples = @($sample) }
+        Write-QuotaJson $statusLinePath @{
+            observed_at = $now.AddMinutes(-10).ToString('o')
+            five_hour = @{ percent = 25; reset = $now.AddHours(1).ToString('o') }
+        }
+        $result = Get-ClaudeLimits $statusLinePath $historyPath $now
+        $result.limits[0].percent | Should Be 25
+        $result.limits[1] | Should BeNullOrEmpty
+
+        Write-TestTextFile $statusLinePath '{'
+        $result = Get-ClaudeLimits $statusLinePath $historyPath $now
+        $result.limits[0].percent | Should Be 12
+        $result.limits[1].percent | Should Be 34
     }
 }
