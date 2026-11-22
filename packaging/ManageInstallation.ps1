@@ -1,8 +1,6 @@
 param(
     [Parameter(Mandatory)][ValidateSet('Install', 'Uninstall')][string]$Operation,
-    [Parameter(Mandatory)][ValidatePattern('^\d+\.\d+\.\d+$')][string]$ProductVersion,
-    [switch]$AutomaticUpdates,
-    [switch]$ConnectClaude
+    [Parameter(Mandatory)][ValidatePattern('^\d+\.\d+\.\d+$')][string]$ProductVersion
 )
 
 $ErrorActionPreference = 'Stop'
@@ -69,7 +67,7 @@ try {
         $collectorChanged = $true
     }
 
-    if ($AutomaticUpdates -and !$previousUpdater) {
+    if (!$previousUpdater) {
         $powershell = Join-Path $env:WINDIR 'System32\WindowsPowerShell\v1.0\powershell.exe'
         $updater = Join-Path $installDirectory 'UpdateAgentMeter.ps1'
         $arguments = '-NoProfile -NonInteractive -WindowStyle Hidden -ExecutionPolicy Bypass -File "' + $updater + '"'
@@ -98,7 +96,6 @@ try {
     }
     New-Item -Path "$toolbarRegistryPath\Implemented Categories\$deskBandCategoryId" -Force | Out-Null
 
-    if (!$AutomaticUpdates -and $previousUpdater) { Remove-AgentMeterTask $updateTaskName }
     New-Item -Path $productRegistryPath -Force | Out-Null
     Set-ItemProperty -LiteralPath $productRegistryPath -Name Version -Value $ProductVersion
 } catch {
@@ -117,20 +114,17 @@ try {
     throw
 }
 
-if ($ConnectClaude) {
-    try {
-        $claudeDirectory = if ($env:CLAUDE_CONFIG_DIR) { $env:CLAUDE_CONFIG_DIR } else { Join-Path $env:USERPROFILE '.claude' }
-        $settingsPath = $ExecutionContext.SessionState.Path.GetUnresolvedProviderPathFromPSPath((Join-Path $claudeDirectory 'settings.json'))
-        if (Set-AgentMeterClaudeConnection $settingsPath $statusLine) {
-            Set-ItemProperty -LiteralPath $productRegistryPath -Name ClaudeSettingsPath -Value $settingsPath
-        }
-    } catch { Write-Warning 'Could not configure the Claude Code status line.' }
-} elseif ($managedClaudeSettings) {
-    try {
-        [void](Set-AgentMeterClaudeConnection $managedClaudeSettings $statusLine -Remove)
-        Remove-ItemProperty -LiteralPath $productRegistryPath -Name ClaudeSettingsPath
-    } catch { Write-Warning 'Could not remove the AgentMeter status-line entry from Claude Code settings.' }
-}
+try {
+    $claudeDirectory = if ($env:CLAUDE_CONFIG_DIR) { $env:CLAUDE_CONFIG_DIR } else { Join-Path $env:USERPROFILE '.claude' }
+    $settingsPath = if ($managedClaudeSettings -and (Test-Path -LiteralPath $managedClaudeSettings -PathType Leaf)) {
+        $managedClaudeSettings
+    } elseif (Test-Path -LiteralPath $claudeDirectory -PathType Container) {
+        $ExecutionContext.SessionState.Path.GetUnresolvedProviderPathFromPSPath((Join-Path $claudeDirectory 'settings.json'))
+    }
+    if ($settingsPath -and (Set-AgentMeterClaudeConnection $settingsPath $statusLine)) {
+        Set-ItemProperty -LiteralPath $productRegistryPath -Name ClaudeSettingsPath -Value $settingsPath
+    }
+} catch { Write-Warning 'Could not configure the Claude Code status line.' }
 
 # A pre-release build used a shared task name. Migrate it only when it belongs to this user and installation.
 $legacyTaskName = 'AgentMeter Taskbar Collector'

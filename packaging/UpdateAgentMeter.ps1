@@ -43,14 +43,19 @@ try {
     $currentVersion = [version](Get-ItemProperty -LiteralPath $registryPath -Name Version).Version
     if ([version]$version -le $currentVersion) { return }
 
-    $setupArguments = '/VERYSILENT', '/SUPPRESSMSGBOXES', '/NORESTART', '/SP-'
-    $setup = Start-Process -FilePath $installerPath -ArgumentList $setupArguments -WindowStyle Hidden -Wait -PassThru
+    $setupArguments = @('/NORESTART', '/SP-')
+    if ($Interactive) {
+        $setup = Start-Process -FilePath $installerPath -ArgumentList $setupArguments -Wait -PassThru
+        if ($setup.ExitCode -eq 2) { return }
+    } else {
+        $setupArguments += '/VERYSILENT', '/SUPPRESSMSGBOXES'
+        $setup = Start-Process -FilePath $installerPath -ArgumentList $setupArguments -WindowStyle Hidden -Wait -PassThru
+    }
     if ($setup.ExitCode -ne 0) { throw "AgentMeter Setup returned exit code $($setup.ExitCode)." }
     $currentVersion = [version](Get-ItemProperty -LiteralPath $registryPath -Name Version).Version
     if ($currentVersion -ne [version]$version) { throw 'Setup did not register the expected version.' }
 
     Add-Content -LiteralPath $logPath -Value "$([DateTimeOffset]::Now.ToString('o')) Installed $version"
-    Show-UpdateMessage "AgentMeter Taskbar was updated to $version. Explorer will load the new toolbar the next time it starts."
 } catch {
     try {
         if ((Test-Path -LiteralPath $logPath) -and (Get-Item -LiteralPath $logPath).Length -gt 65536) {

@@ -131,4 +131,27 @@ Describe 'AgentMeterBand' {
         $previous['claude_c1_fresh_until'] = $now.AddMinutes(1).ToString('o')
         $method.Invoke($null, $arguments) | Should Be 18
     }
+
+    It 'keeps the update button inside the popup at 150 percent scaling' {
+        $members = [Reflection.BindingFlags]'Instance, NonPublic'
+        $assembly = [AgentMeterBand].Assembly
+        $viewType = $assembly.GetType('QuotaView')
+        $popupType = $assembly.GetType('QuotaPopup')
+        $view = $viewType.GetConstructor($members, $null, [type[]]@([IntPtr]), $null).Invoke(@([IntPtr]::Zero))
+        $popup = $popupType.GetConstructor($members, $null, [type[]]@(), $null).Invoke(@())
+        try {
+            $rows = $viewType.GetMethod('BuildPopupRows', $members).Invoke($view, @())
+            $band = [Drawing.Rectangle]::new(0, 200, 48, 150)
+            $workArea = [Drawing.Rectangle]::new(48, 0, 360, 650)
+            $popupType.GetMethod('UpdateContentAndPosition', $members).Invoke(
+                $popup, @($rows.PSObject.BaseObject, $false, 144, $band, $workArea, $true))
+            $button = $popup.Controls | Where-Object { $_ -is [Windows.Forms.Button] }
+            $button.Text | Should Be 'Check for updates'
+            $popup.ClientRectangle.Contains($button.Bounds) | Should Be $true
+            ($button.Width -ge 120) | Should Be $true
+        } finally {
+            $popup.Dispose()
+            $view.Dispose()
+        }
+    }
 }

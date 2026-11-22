@@ -108,19 +108,27 @@ try {
     [IO.Directory]::CreateDirectory($env:CLAUDE_CONFIG_DIR) | Out-Null
     $claudeSettings = Join-Path $env:CLAUDE_CONFIG_DIR 'settings.json'
     [IO.File]::WriteAllText($claudeSettings, '{"permissions":{"allow":["Read"]}}')
-    if ((Start-TestSetup $PreviousInstaller ($options + '/MERGETASKS=claudecode' + "/LOG=$logDirectory\install.log")) -ne 0) {
+    if ((Start-TestSetup $PreviousInstaller ($options + '/MERGETASKS=!autoupdate,!claudecode' + "/LOG=$logDirectory\install.log")) -ne 0) {
         throw 'Fresh setup failed.'
     }
     Assert-InstalledVersion ($PreviousVersion.ToString())
-    if (!(Get-Content -LiteralPath $claudeSettings -Raw | ConvertFrom-Json).statusLine.command) {
-        throw 'The selected Claude Code integration was not installed.'
-    }
-    if (!(Get-ScheduledTask -TaskName $collectorTask) -or !(Get-ScheduledTask -TaskName $updateTask)) {
-        throw 'Setup did not create both per-user tasks.'
+    if ((Get-Content -LiteralPath $claudeSettings -Raw | ConvertFrom-Json).statusLine -or
+        (Get-ScheduledTask -TaskName $updateTask -ErrorAction SilentlyContinue)) {
+        throw 'The previous release did not honor the fixture task selections.'
     }
     $initialUninstall = (Get-ItemProperty -LiteralPath $uninstallKey).UninstallString
     Invoke-TestAutomaticUpdate
     Assert-InstalledVersion $Version
+    if (!(Get-Content -LiteralPath $claudeSettings -Raw | ConvertFrom-Json).statusLine.command) {
+        throw 'Setup did not connect the existing Claude Code profile.'
+    }
+    $updaterTriggers = (Get-ScheduledTask -TaskName $updateTask).Triggers
+    if (!($updaterTriggers | Where-Object { $_.CimClass.CimClassName -eq 'MSFT_TaskLogonTrigger' -and $_.Enabled })) {
+        throw 'Automatic updates must check at Windows sign-in.'
+    }
+    if (!(Test-Path -LiteralPath (Join-Path $installDirectory 'RestartExplorer.ps1') -PathType Leaf)) {
+        throw 'Setup did not package the interactive Explorer restart helper.'
+    }
     $collectorLauncher = Join-Path $installDirectory "AgentMeterCollector-$Version.exe"
     $collectorAction = (Get-ScheduledTask -TaskName $collectorTask).Actions
     if ($collectorAction.Execute -ne $collectorLauncher -or (Test-Path -LiteralPath (Join-Path $installDirectory 'RefreshQuota.vbs'))) {
@@ -140,16 +148,11 @@ try {
     }
     Assert-InstalledVersion $Version
 
-    $optOut = $options + '/MERGETASKS=!autoupdate' + "/LOG=$logDirectory\opt-out.log"
-    if ((Start-TestSetup $Installer $optOut) -ne 0) { throw 'Reconfiguring Setup failed.' }
-    if (Get-ScheduledTask -TaskName $updateTask -ErrorAction SilentlyContinue) {
-        throw 'Disabling automatic updates did not remove its scheduled task.'
-    }
     if ((Start-TestSetup $Installer ($options + "/LOG=$logDirectory\reinstall.log")) -ne 0) {
-        throw 'Reinstalling with the prior task selection failed.'
+        throw 'Reinstalling failed.'
     }
-    if (Get-ScheduledTask -TaskName $updateTask -ErrorAction SilentlyContinue) {
-        throw 'Setup did not preserve the automatic-update preference.'
+    if (!(Get-ScheduledTask -TaskName $updateTask -ErrorAction SilentlyContinue)) {
+        throw 'Reinstalling did not preserve the automatic-update task.'
     }
 
     $uninstaller = $initialUninstall.Trim('"')
@@ -177,4 +180,4 @@ try {
 } finally {
     if (Test-Path -LiteralPath $startAllBack) { Remove-Item -LiteralPath $startAllBack -Recurse }
 }
-Write-Host 'Verified prerequisite check, per-user install, signed background update, update preference, and uninstall.'
+Write-Host 'Verified prerequisite check, per-user install, signed background update, sign-in trigger, and uninstall.'

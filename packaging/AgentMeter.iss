@@ -35,10 +35,6 @@ OutputBaseFilename=AgentMeter-Taskbar-Setup-v{#AppVersion}
 Compression=lzma2
 SolidCompression=yes
 
-[Tasks]
-Name: "autoupdate"; Description: "Install verified updates automatically"
-Name: "claudecode"; Description: "Connect Claude Code if it has no custom status line"; Flags: unchecked
-
 [Files]
 Source: "{#BuildDirectory}\AgentMeterBand-{#AppVersion}.dll"; DestDir: "{app}"; Flags: ignoreversion onlyifdoesntexist uninsrestartdelete
 Source: "..\src\QuotaData.ps1"; DestDir: "{app}"; Flags: ignoreversion
@@ -49,6 +45,7 @@ Source: "ManageInstallation.ps1"; DestDir: "{app}"; Flags: ignoreversion
 Source: "ClaudeConnection.ps1"; DestDir: "{app}"; Flags: ignoreversion
 Source: "UpdateAgentMeter.ps1"; DestDir: "{app}"; Flags: ignoreversion
 Source: "UpdateManifest.ps1"; DestDir: "{app}"; Flags: ignoreversion
+Source: "RestartExplorer.ps1"; DestDir: "{app}"; Flags: ignoreversion
 Source: "update-public.xml"; DestDir: "{app}"; Flags: ignoreversion
 Source: "..\LICENSE"; DestDir: "{app}"
 Source: "..\NOTICE-AgentMeter.txt"; DestDir: "{app}"
@@ -103,14 +100,26 @@ begin
   Arguments := '-NoProfile -NonInteractive -ExecutionPolicy Bypass -File "' +
     ExpandConstant('{app}\ManageInstallation.ps1') + '" -Operation ' + Action +
     ' -ProductVersion {#AppVersion}';
-  if (Action = 'Install') and WizardIsTaskSelected('autoupdate') then
-    Arguments := Arguments + ' -AutomaticUpdates';
-  if (Action = 'Install') and WizardIsTaskSelected('claudecode') then
-    Arguments := Arguments + ' -ConnectClaude';
   Result := Exec(ExpandConstant('{sys}\WindowsPowerShell\v1.0\powershell.exe'), Arguments,
     ExpandConstant('{app}'), SW_HIDE, ewWaitUntilTerminated, ExitCode) and (ExitCode = 0);
   if not Result then
     Log('AgentMeter ' + Action + ' integration returned ' + IntToStr(ExitCode));
+end;
+
+procedure RestartExplorerAfterSetup;
+var
+  Arguments: String;
+  ExitCode: Integer;
+begin
+  Arguments := '-NoProfile -NonInteractive -ExecutionPolicy Bypass -File "' +
+    ExpandConstant('{app}\RestartExplorer.ps1') + '"';
+  if not Exec(ExpandConstant('{sys}\WindowsPowerShell\v1.0\powershell.exe'), Arguments,
+    ExpandConstant('{app}'), SW_HIDE, ewNoWait, ExitCode) then
+  begin
+    Log('Could not start the Explorer restart helper: ' + IntToStr(ExitCode));
+    SuppressibleMsgBox('AgentMeter is installed. Restart Windows Explorer to load the new toolbar.',
+      mbInformation, MB_OK, IDOK);
+  end;
 end;
 
 procedure CurStepChanged(Step: TSetupStep);
@@ -118,6 +127,8 @@ begin
   if Step = ssPostInstall then
     if not RunInstallationAction('Install') then
       RaiseException('Could not register AgentMeter Taskbar with Windows.');
+  if (Step = ssDone) and not WizardSilent then
+    RestartExplorerAfterSetup;
 end;
 
 function InitializeUninstall: Boolean;
@@ -133,5 +144,5 @@ begin
   if PageID = wpFinished then
     WizardForm.FinishedLabel.Caption :=
       'AgentMeter Taskbar is installed. Right-click the classic taskbar and choose Toolbars > AgentMeter Quotas. ' +
-      'Windows loads updated toolbar code the next time Explorer starts.';
+      'Windows Explorer will restart when you finish Setup. This can close open Explorer windows.';
 end;

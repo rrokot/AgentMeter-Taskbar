@@ -49,12 +49,19 @@ internal sealed class QuotaPopup : Form {
  }
 
  private List<Row> rows;
+ private readonly Button updateButton = new Button {
+  Text = "Check for updates",
+  FlatStyle = FlatStyle.Flat,
+  UseVisualStyleBackColor = false,
+  Cursor = Cursors.Hand
+ };
  private Font usageFont, headingFont, detailFont;
  private int dpi, usageFontPixels, padding, minimumColumnGap;
- private int periodColumnWidth, percentColumnWidth, countdownColumnWidth;
+ private int periodColumnWidth, percentColumnWidth, countdownColumnWidth, footerTop;
  private Size roundedWindowSize;
  private int roundedWindowRadius;
  private Color textColor, detailColor, borderColor, separatorColor, fiveHourTextColor, weeklyTextColor;
+ internal event EventHandler UpdateRequested;
 
  internal QuotaPopup() {
   Text = "AgentMeter Quotas";
@@ -63,6 +70,11 @@ internal sealed class QuotaPopup : Form {
   StartPosition = FormStartPosition.Manual;
   AutoScaleMode = AutoScaleMode.None;
   SetStyle(ControlStyles.OptimizedDoubleBuffer | ControlStyles.ResizeRedraw, true);
+  updateButton.Click += delegate {
+   EventHandler handler = UpdateRequested;
+   if (handler != null) handler(this, EventArgs.Empty);
+  };
+  Controls.Add(updateButton);
  }
 
  private static string GetVersionLabel() {
@@ -96,6 +108,11 @@ internal sealed class QuotaPopup : Form {
   separatorColor = highContrast ? textColor : lightTheme ? Color.FromArgb(224, 230, 241) : Color.FromArgb(61, 68, 84);
   fiveHourTextColor = highContrast ? textColor : lightTheme ? Color.FromArgb(27, 82, 173) : QuotaView.FiveHourTop;
   weeklyTextColor = highContrast ? textColor : lightTheme ? Color.FromArgb(158, 60, 26) : QuotaView.WeeklyTop;
+  updateButton.ForeColor = highContrast ? SystemColors.ControlText : textColor;
+  updateButton.BackColor = highContrast ? SystemColors.Control : lightTheme ? Color.FromArgb(237, 242, 250) : Color.FromArgb(41, 47, 60);
+  updateButton.FlatAppearance.BorderColor = borderColor;
+  updateButton.FlatAppearance.MouseOverBackColor = highContrast ? SystemColors.Control : lightTheme ?
+   Color.FromArgb(223, 233, 247) : Color.FromArgb(53, 62, 79);
 
   int availableContentWidth = Math.Max(1, workArea.Width - 2 * padding);
   SetFonts(Math.Min(Scale(PreferredUsageFontPixels), Math.Max(1, availableContentWidth / 8)));
@@ -113,6 +130,7 @@ internal sealed class QuotaPopup : Form {
   }
   var popupSize = new Size(contentWidth + 2 * padding, Math.Min(popupHeight, workArea.Height));
   Bounds = new Rectangle(GetPopupLocation(bandBounds, workArea, popupSize, Scale(GapFromTaskbar), isVerticalTaskbar), popupSize);
+  updateButton.SetBounds(padding, footerTop, Math.Min(UpdateButtonWidth(), contentWidth), FooterHeight);
   int cornerRadius = Scale(PopupCornerRadius);
   if (ClientSize != roundedWindowSize || cornerRadius != roundedWindowRadius) {
    using (var outline = PopupOutline.CreateRoundedRectangle(ClientRectangle, cornerRadius)) {
@@ -153,6 +171,7 @@ internal sealed class QuotaPopup : Form {
    FontStyle.Regular, GraphicsUnit.Pixel);
   detailFont = new Font("Segoe UI Variable Text", Math.Max(1, PreferredDetailFontPixels * fontScale),
    FontStyle.Regular, GraphicsUnit.Pixel);
+  updateButton.Font = detailFont;
  }
 
  private static bool IsPeriod(Row row) {
@@ -162,6 +181,9 @@ internal sealed class QuotaPopup : Form {
  private static int MeasureLine(string value, Font font) {
   return String.IsNullOrEmpty(value) ? 0 : TextRenderer.MeasureText(value, font, Size.Empty, LineFlags).Width;
  }
+
+ private int UpdateButtonWidth() { return MeasureLine(updateButton.Text, detailFont) + Scale(20); }
+ private int FooterHeight { get { return detailFont.Height + Scale(12); } }
 
  private int MeasureContentWidthAndColumns() {
   periodColumnWidth = MeasureLine("7d", detailFont);
@@ -177,7 +199,8 @@ internal sealed class QuotaPopup : Form {
    }
   }
   int quotaRowWidth = periodColumnWidth + percentColumnWidth + countdownColumnWidth + 2 * minimumColumnGap;
-  return Math.Max(Math.Max(headingWidth, quotaRowWidth), MeasureLine(VersionLabel, detailFont));
+  int footerWidth = UpdateButtonWidth() + minimumColumnGap + MeasureLine(VersionLabel, detailFont);
+  return Math.Max(Math.Max(headingWidth, quotaRowWidth), footerWidth);
  }
 
  // Use the same layout for measurement and painting so DPI and wrapped notices agree.
@@ -215,10 +238,12 @@ internal sealed class QuotaPopup : Form {
     y += DrawNotice(graphics, row.Label, detailColor, y, contentWidth);
    }
   }
-  y += Scale(8);
-  DrawLine(graphics, VersionLabel, detailFont, detailColor, padding, y, contentWidth, detailFont.Height,
+  y += Scale(12);
+  if (graphics == null) footerTop = y;
+  int versionLeft = padding + UpdateButtonWidth() + minimumColumnGap;
+  DrawLine(graphics, VersionLabel, detailFont, detailColor, versionLeft, y, padding + contentWidth - versionLeft, FooterHeight,
    LineFlags | TextFormatFlags.Right);
-  return y + detailFont.Height;
+  return y + FooterHeight;
  }
 
  private int DrawNotice(Graphics graphics, string value, Color color, int y, int width) {

@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.ComponentModel;
 using System.Diagnostics;
 using System.Drawing;
 using System.Drawing.Drawing2D;
@@ -20,6 +21,8 @@ internal sealed class QuotaView : Control {
  private const int IncreaseHoldMilliseconds = 300;
  private const int IncreaseDisplayMilliseconds = IncreaseRiseMilliseconds + IncreaseHoldMilliseconds;
  private const int IncreaseFrameIntervalMilliseconds = 25;
+ private const int PopupPointerPollMilliseconds = 75;
+ private const int PopupPointerLeaveMilliseconds = 300;
  private static readonly TimeSpan MaximumDataAge = TimeSpan.FromMinutes(3);
  private static readonly string[] QuotaKeys = { "claude_c1", "claude_c2", "codex_c1", "codex_c2" };
  internal static readonly Color FiveHourTop = Color.FromArgb(115, 227, 242);
@@ -30,7 +33,9 @@ internal sealed class QuotaView : Control {
  private static readonly Color WeeklyIncreaseTextColor = Color.FromArgb(192, 33, 44);
  private readonly Timer snapshotTimer = new Timer { Interval = SnapshotPollIntervalMilliseconds };
  private readonly Timer increaseDisplayTimer = new Timer { Interval = IncreaseFrameIntervalMilliseconds };
+ private readonly Timer popupPointerTimer = new Timer { Interval = PopupPointerPollMilliseconds };
  private readonly Stopwatch increaseDisplayClock = new Stopwatch();
+ private readonly Stopwatch popupPointerClock = new Stopwatch();
  private readonly int[] usageIncreases = new int[QuotaKeys.Length];
  private readonly FontFamily increaseTypeface = new FontFamily(SemiboldTypeface);
  private bool animateIncreaseRise;
@@ -63,6 +68,7 @@ internal sealed class QuotaView : Control {
   Text = "AgentMeter Taskbar Quotas";
   SetStyle(ControlStyles.UserPaint | ControlStyles.AllPaintingInWmPaint | ControlStyles.OptimizedDoubleBuffer | ControlStyles.ResizeRedraw, true);
   snapshotTimer.Tick += delegate { RefreshSnapshot(); };
+  popupPointerTimer.Tick += delegate { CheckPopupPointer(); };
   increaseDisplayTimer.Tick += delegate {
    long elapsedMilliseconds = increaseDisplayClock.ElapsedMilliseconds;
    if (elapsedMilliseconds >= IncreaseDisplayMilliseconds) StopIncreaseDisplay();
@@ -77,7 +83,7 @@ internal sealed class QuotaView : Control {
  internal void SetTaskbarOrientation(bool vertical) {
   if (isVerticalTaskbar == vertical) return;
   isVerticalTaskbar = vertical;
-  if (popup != null) popup.Hide();
+  HidePopup();
   Invalidate();
  }
  protected override CreateParams CreateParams {
@@ -90,23 +96,57 @@ internal sealed class QuotaView : Control {
  protected override void OnMouseHover(EventArgs e) {
   base.OnMouseHover(e);
   if (!IsHandleCreated || !Visible || !ClientRectangle.Contains(PointToClient(Cursor.Position))) return;
-  if (popup == null) popup = new QuotaPopup();
+  if (popup == null) {
+   popup = new QuotaPopup();
+   popup.UpdateRequested += delegate { StartInteractiveUpdate(); };
+  }
   UpdatePopup();
   if (!popup.Visible) popup.Show(this);
+  popupPointerClock.Restart();
+  popupPointerTimer.Start();
  }
- protected override void OnMouseLeave(EventArgs e) {
-  base.OnMouseLeave(e);
+ private void CheckPopupPointer() {
+  Point pointer = Cursor.Position;
+  if (popup != null && popup.Visible &&
+      (ClientRectangle.Contains(PointToClient(pointer)) || popup.Bounds.Contains(pointer))) {
+   popupPointerClock.Restart();
+  } else if (popupPointerClock.ElapsedMilliseconds >= PopupPointerLeaveMilliseconds) {
+   HidePopup();
+  }
+ }
+ private void HidePopup() {
+  popupPointerTimer.Stop();
+  popupPointerClock.Reset();
   if (popup != null) popup.Hide();
+ }
+ private void StartInteractiveUpdate() {
+  HidePopup();
+  string updater = Path.Combine(Path.GetDirectoryName(snapshotPath), "UpdateAgentMeter.ps1");
+  string powershell = Path.Combine(Environment.SystemDirectory, @"WindowsPowerShell\v1.0\powershell.exe");
+  if (File.Exists(updater)) {
+   try {
+    using (Process check = Process.Start(new ProcessStartInfo {
+     FileName = powershell,
+     Arguments = "-NoProfile -NonInteractive -ExecutionPolicy Bypass -File \"" + updater + "\" -Interactive",
+     UseShellExecute = false,
+     CreateNoWindow = true
+    })) { }
+    return;
+   } catch (Win32Exception) { }
+  }
+  MessageBox.Show("Could not start the update check. Run AgentMeter Setup to repair the installation.",
+   "AgentMeter Taskbar", MessageBoxButtons.OK, MessageBoxIcon.Error);
  }
  protected override void OnVisibleChanged(EventArgs e) {
   base.OnVisibleChanged(e);
   if (!Visible) {
-   if (popup != null) popup.Hide();
+   HidePopup();
    StopIncreaseDisplay();
   }
  }
  protected override void OnHandleDestroyed(EventArgs e) {
   StopIncreaseDisplay();
+  HidePopup();
   if (popup != null) {
    popup.Dispose();
    popup = null;
@@ -419,6 +459,7 @@ internal sealed class QuotaView : Control {
   base.Dispose(disposing);
   if (disposing) {
    increaseDisplayTimer.Dispose();
+   popupPointerTimer.Dispose();
    increaseTypeface.Dispose();
   }
  }
