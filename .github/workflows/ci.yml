@@ -47,8 +47,8 @@ jobs:
           Invoke-WebRequest -UseBasicParsing -Uri "$previousRelease/AgentMeter-Taskbar-Setup-v$previousVersion.exe" -OutFile $previousSetup
           $previousHash = '9ab36dcb94daaad3f5b257882ced6dc63a3c95606b32f0868a5b4f5a97af284c'
           if ((Get-FileHash -LiteralPath $previousSetup -Algorithm SHA256).Hash -ne $previousHash) { throw 'Upgrade fixture checksum mismatch.' }
-          & .\packaging\Build-Installer.ps1 -Version $version -InnoCompiler $env:INNO_COMPILER
-          & .\packaging\Test-Installer.ps1 -PreviousInstaller $previousSetup -PreviousVersion $previousVersion -Installer ".\dist\AgentMeter-Taskbar-Setup-v$version.exe" -Version $version
+          & .\build\Build-Installer.ps1 -Version $version -InnoCompiler $env:INNO_COMPILER
+          & .\tests\installation\Test-Installer.ps1 -PreviousInstaller $previousSetup -PreviousVersion $previousVersion -Installer ".\dist\AgentMeter-Taskbar-Setup-v$version.exe" -Version $version
       - uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6.0.0
         with:
           name: windows-installer

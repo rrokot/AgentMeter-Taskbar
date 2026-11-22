@@ -37,16 +37,16 @@ SolidCompression=yes
 
 [Files]
 Source: "{#BuildDirectory}\AgentMeterBand-{#AppVersion}.dll"; DestDir: "{app}"; Flags: ignoreversion onlyifdoesntexist uninsrestartdelete
-Source: "..\src\QuotaData.ps1"; DestDir: "{app}"; Flags: ignoreversion
-Source: "..\src\ClaudeStatusLine.ps1"; DestDir: "{app}"; Flags: ignoreversion
-Source: "..\src\RefreshQuota.ps1"; DestDir: "{app}"; Flags: ignoreversion
+Source: "..\src\Collector\QuotaData.ps1"; DestDir: "{app}"; Flags: ignoreversion
+Source: "..\src\Collector\ClaudeStatusLine.ps1"; DestDir: "{app}"; Flags: ignoreversion
+Source: "..\src\Collector\RefreshQuota.ps1"; DestDir: "{app}"; Flags: ignoreversion
 Source: "{#BuildDirectory}\AgentMeterCollector-{#AppVersion}.exe"; DestDir: "{app}"; Flags: ignoreversion onlyifdoesntexist uninsrestartdelete
 Source: "ManageInstallation.ps1"; DestDir: "{app}"; Flags: ignoreversion
 Source: "ClaudeConnection.ps1"; DestDir: "{app}"; Flags: ignoreversion
-Source: "UpdateAgentMeter.ps1"; DestDir: "{app}"; Flags: ignoreversion
-Source: "UpdateManifest.ps1"; DestDir: "{app}"; Flags: ignoreversion
-Source: "RestartExplorer.ps1"; DestDir: "{app}"; Flags: ignoreversion
-Source: "update-public.xml"; DestDir: "{app}"; Flags: ignoreversion
+Source: "..\src\Updater\UpdateAgentMeter.ps1"; DestDir: "{app}"; Flags: ignoreversion
+Source: "..\src\Updater\UpdateManifest.ps1"; DestDir: "{app}"; Flags: ignoreversion
+Source: "..\src\Updater\RestartExplorer.ps1"; DestDir: "{app}"; Flags: ignoreversion
+Source: "..\src\Updater\update-public.xml"; DestDir: "{app}"; Flags: ignoreversion
 Source: "..\LICENSE"; DestDir: "{app}"
 Source: "..\NOTICE-AgentMeter.txt"; DestDir: "{app}"
 

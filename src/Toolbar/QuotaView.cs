@@ -17,6 +17,11 @@ internal sealed class QuotaView : Control {
  internal const string SemiboldTypeface = "Segoe UI Semibold";
  private const int SnapshotPollIntervalMilliseconds = 5000;
  private const int QuotaPeriodsPerProvider = 2;
+ private const int ClaudeFiveHourTrackIndex = 0;
+ private const int CodexFiveHourTrackIndex = QuotaPeriodsPerProvider;
+ private const int WeeklyTrackOffset = 1;
+ private const string FiveHourSnapshotSlot = "c1";
+ private const string WeeklySnapshotSlot = "c2";
  private const int IncreaseRiseMilliseconds = 2100;
  private const int IncreaseHoldMilliseconds = 300;
  private const int IncreaseDisplayMilliseconds = IncreaseRiseMilliseconds + IncreaseHoldMilliseconds;
@@ -24,7 +29,12 @@ internal sealed class QuotaView : Control {
  private const int PopupPointerPollMilliseconds = 75;
  private const int PopupPointerLeaveMilliseconds = 300;
  private static readonly TimeSpan MaximumDataAge = TimeSpan.FromMinutes(3);
- private static readonly string[] QuotaKeys = { "claude_c1", "claude_c2", "codex_c1", "codex_c2" };
+ private static readonly QuotaTrack[] QuotaTracks = {
+  new QuotaTrack("claude", FiveHourSnapshotSlot, "5h", QuotaPopup.RowKind.FiveHour),
+  new QuotaTrack("claude", WeeklySnapshotSlot, "7d", QuotaPopup.RowKind.Weekly),
+  new QuotaTrack("codex", FiveHourSnapshotSlot, "5h", QuotaPopup.RowKind.FiveHour),
+  new QuotaTrack("codex", WeeklySnapshotSlot, "7d", QuotaPopup.RowKind.Weekly)
+ };
  internal static readonly Color FiveHourTop = Color.FromArgb(115, 227, 242);
  private static readonly Color FiveHourBottom = Color.FromArgb(69, 134, 237);
  internal static readonly Color WeeklyTop = Color.FromArgb(255, 209, 168);
@@ -36,7 +46,7 @@ internal sealed class QuotaView : Control {
  private readonly Timer popupPointerTimer = new Timer { Interval = PopupPointerPollMilliseconds };
  private readonly Stopwatch increaseDisplayClock = new Stopwatch();
  private readonly Stopwatch popupPointerClock = new Stopwatch();
- private readonly int[] usageIncreases = new int[QuotaKeys.Length];
+ private readonly int[] usageIncreases = new int[QuotaTracks.Length];
  private readonly FontFamily increaseTypeface = new FontFamily(SemiboldTypeface);
  private bool animateIncreaseRise;
  private QuotaPopup popup;
@@ -48,6 +58,17 @@ internal sealed class QuotaView : Control {
  private DateTimeOffset snapshotWrittenAt;
  private bool lightTheme;
  private bool isVerticalTaskbar;
+ private struct QuotaTrack {
+  internal readonly string ProviderKey, SnapshotKey, DefaultLabel;
+  internal readonly QuotaPopup.RowKind Period;
+
+  internal QuotaTrack(string providerKey, string snapshotSlot, string defaultLabel, QuotaPopup.RowKind period) {
+   ProviderKey = providerKey;
+   SnapshotKey = providerKey + "_" + snapshotSlot;
+   DefaultLabel = defaultLabel;
+   Period = period;
+  }
+ }
  private enum UpdateAction { Check, Install, Restart }
  private UpdateAction nextUpdateAction;
  private Version updateVersion;
@@ -247,9 +268,9 @@ internal sealed class QuotaView : Control {
   if (!canCompareUsage || !HasFreshSnapshot(now)) return;
 
   bool hasIncrease = false;
-  for (int index = 0; index < usageIncreases.Length; index++) {
-   usageIncreases[index] = GetUsageIncrease(previousSnapshot, nextSnapshot, index, now);
-   hasIncrease |= usageIncreases[index] > 0;
+  for (int trackIndex = 0; trackIndex < usageIncreases.Length; trackIndex++) {
+   usageIncreases[trackIndex] = GetUsageIncrease(previousSnapshot, nextSnapshot, trackIndex, now);
+   hasIncrease |= usageIncreases[trackIndex] > 0;
   }
   if (!hasIncrease) {
    StopIncreaseDisplay();
@@ -265,13 +286,14 @@ internal sealed class QuotaView : Control {
   increaseDisplayTimer.Start();
  }
  private static int GetUsageIncrease(Dictionary<string, string> previousSnapshot, Dictionary<string, string> nextSnapshot,
-  int index, DateTimeOffset now) {
-  string quotaKey = QuotaKeys[index];
+  int trackIndex, DateTimeOffset now) {
+  QuotaTrack track = QuotaTracks[trackIndex];
+  string quotaKey = track.SnapshotKey;
   DateTimeOffset? resetAt = ReadResetTime(nextSnapshot, quotaKey);
   int previousPercent, nextPercent;
   if (resetAt != ReadResetTime(previousSnapshot, quotaKey) ||
-      !TryGetUsagePercent(previousSnapshot, index, now, resetAt, out previousPercent) ||
-      !TryGetUsagePercent(nextSnapshot, index, now, resetAt, out nextPercent)) return 0;
+      !TryGetUsagePercent(previousSnapshot, track, now, resetAt, out previousPercent) ||
+      !TryGetUsagePercent(nextSnapshot, track, now, resetAt, out nextPercent)) return 0;
   return Math.Max(0, nextPercent - previousPercent);
  }
  private void StopIncreaseDisplay() {
@@ -303,21 +325,21 @@ internal sealed class QuotaView : Control {
   percent = Math.Min(100, Math.Max(0, percent));
   return true;
  }
- private static bool TryGetUsagePercent(Dictionary<string, string> snapshot, int index, DateTimeOffset now,
+ private static bool TryGetUsagePercent(Dictionary<string, string> snapshot, QuotaTrack track, DateTimeOffset now,
   DateTimeOffset? resetAt, out int percent) {
   string status;
-  string quotaKey = QuotaKeys[index];
-  string statusKey = index < QuotaPeriodsPerProvider ? "claude_status" : "codex_status";
+  string quotaKey = track.SnapshotKey;
+  string statusKey = track.ProviderKey + "_status";
   percent = 0;
   if (resetAt <= now || ReadTimestamp(snapshot, quotaKey + "_fresh_until") <= now ||
       !snapshot.TryGetValue(statusKey, out status) || status != "ok" ||
       !TryReadPercent(snapshot, quotaKey + "_pct", out percent)) return false;
   return true;
  }
- private Rectangle GetTrackBounds(int index, int dpi) {
-  return isVerticalTaskbar ? GetVerticalTrackBounds(index, dpi) : GetHorizontalTrackBounds(index, dpi);
+ private Rectangle GetTrackBounds(int trackIndex, int dpi) {
+  return isVerticalTaskbar ? GetVerticalTrackBounds(trackIndex, dpi) : GetHorizontalTrackBounds(trackIndex, dpi);
  }
- private Rectangle GetHorizontalTrackBounds(int index, int dpi) {
+ private Rectangle GetHorizontalTrackBounds(int trackIndex, int dpi) {
   const int ProviderCount = 2;
   int availableWidth = Math.Min(ClientSize.Width, PreferredHorizontalLength * dpi / DefaultDpi);
   if (availableWidth < ProviderCount || ClientSize.Height < QuotaPeriodsPerProvider) return Rectangle.Empty;
@@ -326,18 +348,18 @@ internal sealed class QuotaView : Control {
   int sidePadding = Math.Min(5 * dpi / DefaultDpi, (availableWidth - providerGap - ProviderCount) / 2);
   int trackWidth = (availableWidth - 2 * sidePadding - providerGap) / ProviderCount;
   int firstTrackLeft = (ClientSize.Width - (ProviderCount * trackWidth + providerGap)) / 2;
-  int providerIndex = index / QuotaPeriodsPerProvider;
+  int providerIndex = trackIndex / QuotaPeriodsPerProvider;
   int trackLeft = firstTrackLeft + providerIndex * (trackWidth + providerGap);
 
   int periodGap = Math.Min(3 * dpi / DefaultDpi, (ClientSize.Height - QuotaPeriodsPerProvider) / 3);
   int trackHeight = Math.Min(7 * dpi / DefaultDpi, (ClientSize.Height - periodGap) / QuotaPeriodsPerProvider);
   int firstTrackTop = (ClientSize.Height - (QuotaPeriodsPerProvider * trackHeight + periodGap)) / 2;
-  int periodIndex = index % QuotaPeriodsPerProvider;
+  int periodIndex = trackIndex % QuotaPeriodsPerProvider;
   return new Rectangle(trackLeft, firstTrackTop + periodIndex * (trackHeight + periodGap), trackWidth, trackHeight);
  }
- private Rectangle GetVerticalTrackBounds(int index, int dpi) {
+ private Rectangle GetVerticalTrackBounds(int trackIndex, int dpi) {
   int availableWidth = Math.Min(ClientSize.Width, PreferredVerticalLayoutWidth * dpi / DefaultDpi);
-  int trackCount = QuotaKeys.Length;
+  int trackCount = QuotaTracks.Length;
   if (availableWidth < trackCount) return Rectangle.Empty;
   const int ExtraGapUnitsBetweenProviders = 2;
   int gapsBetweenTracks = trackCount - 1;
@@ -348,7 +370,7 @@ internal sealed class QuotaView : Control {
   int trackWidth = Math.Max(1, (availableWidth - horizontalPadding - extraProviderGap - gapsBetweenTracks * trackGap) / trackCount);
   int totalTrackWidth = trackCount * trackWidth + gapsBetweenTracks * trackGap + extraProviderGap;
   int firstTrackLeft = (ClientSize.Width - totalTrackWidth) / 2;
-  int trackLeft = firstTrackLeft + index * (trackWidth + trackGap) + (index >= QuotaPeriodsPerProvider ? extraProviderGap : 0);
+  int trackLeft = firstTrackLeft + trackIndex * (trackWidth + trackGap) + (trackIndex >= CodexFiveHourTrackIndex ? extraProviderGap : 0);
   int verticalPadding = 3 * dpi / DefaultDpi;
   return new Rectangle(trackLeft, verticalPadding, trackWidth, Math.Max(0, ClientSize.Height - 2 * verticalPadding));
  }
@@ -358,29 +380,30 @@ internal sealed class QuotaView : Control {
   if (dpi == 0) dpi = DefaultDpi;
   DateTimeOffset now = DateTimeOffset.UtcNow;
   bool hasFreshSnapshot = HasFreshSnapshot(now);
-  for (int index = 0; index < QuotaKeys.Length; index++) {
-   Rectangle track = GetTrackBounds(index, dpi);
-   if (track.Width == 0 || track.Height == 0) continue;
-   e.Graphics.FillRectangle(lightTheme ? Brushes.Silver : Brushes.DimGray, track);
-   string quotaKey = QuotaKeys[index];
+  for (int trackIndex = 0; trackIndex < QuotaTracks.Length; trackIndex++) {
+   QuotaTrack track = QuotaTracks[trackIndex];
+   Rectangle trackBounds = GetTrackBounds(trackIndex, dpi);
+   if (trackBounds.Width == 0 || trackBounds.Height == 0) continue;
+   e.Graphics.FillRectangle(lightTheme ? Brushes.Silver : Brushes.DimGray, trackBounds);
+   string quotaKey = track.SnapshotKey;
    DateTimeOffset? resetAt = ReadResetTime(snapshot, quotaKey);
    int percent = 0;
-   bool current = hasFreshSnapshot && TryGetUsagePercent(snapshot, index, now, resetAt, out percent);
-   if (!current && !TryReadPercent(snapshot, quotaKey + "_last_pct", out percent)) continue;
+   bool hasCurrentUsage = hasFreshSnapshot && TryGetUsagePercent(snapshot, track, now, resetAt, out percent);
+   if (!hasCurrentUsage && !TryReadPercent(snapshot, quotaKey + "_last_pct", out percent)) continue;
    if (percent == 0) continue;
-   int trackLength = isVerticalTaskbar ? track.Height : track.Width;
+   int trackLength = isVerticalTaskbar ? trackBounds.Height : trackBounds.Width;
    int fillLength = Math.Max(1, percent * trackLength / 100);
-   var fill = isVerticalTaskbar ? new Rectangle(track.X, track.Bottom - fillLength, track.Width, fillLength)
-    : new Rectangle(track.X, track.Y, fillLength, track.Height);
-   bool weekly = index % QuotaPeriodsPerProvider == 1;
-   int opacity = current ? 255 : 105;
+   var fill = isVerticalTaskbar ? new Rectangle(trackBounds.X, trackBounds.Bottom - fillLength, trackBounds.Width, fillLength)
+    : new Rectangle(trackBounds.X, trackBounds.Y, fillLength, trackBounds.Height);
+   bool weekly = track.Period == QuotaPopup.RowKind.Weekly;
+   int opacity = hasCurrentUsage ? 255 : 105;
    Color startColor = Color.FromArgb(opacity, weekly ? WeeklyTop : FiveHourTop);
    Color endColor = Color.FromArgb(opacity, weekly ? WeeklyBottom : FiveHourBottom);
    using (var brush = new LinearGradientBrush(fill, startColor, endColor, LinearGradientMode.Vertical)) {
     e.Graphics.FillRectangle(brush, fill);
    }
    const int WarningPercent = 60, CriticalPercent = 85;
-   if (current && percent >= WarningPercent && fillLength > 1) {
+   if (hasCurrentUsage && percent >= WarningPercent && fillLength > 1) {
     var warningEdge = isVerticalTaskbar ? new Rectangle(fill.X, fill.Y, fill.Width, 1)
      : new Rectangle(fill.Right - 1, fill.Y, 1, fill.Height);
     e.Graphics.FillRectangle(percent >= CriticalPercent ? Brushes.Tomato : Brushes.Gold, warningEdge);
@@ -405,7 +428,7 @@ internal sealed class QuotaView : Control {
   SmoothingMode previousSmoothing = graphics.SmoothingMode;
   graphics.SmoothingMode = SmoothingMode.AntiAlias;
   for (int fiveHourIndex = 0; fiveHourIndex < usageIncreases.Length; fiveHourIndex += QuotaPeriodsPerProvider) {
-   int weeklyIndex = fiveHourIndex + 1;
+   int weeklyIndex = fiveHourIndex + WeeklyTrackOffset;
    bool showWeeklyIncrease = usageIncreases[weeklyIndex] > 0;
    int displayedIncrease = usageIncreases[showWeeklyIncrease ? weeklyIndex : fiveHourIndex];
    if (displayedIncrease == 0) continue;
@@ -450,41 +473,47 @@ internal sealed class QuotaView : Control {
   DateTimeOffset now = DateTimeOffset.UtcNow;
   var rows = new List<QuotaPopup.Row>();
   if (!HasFreshSnapshot(now)) {
-   if (snapshot.ContainsKey("claude_c1_last_pct") || snapshot.ContainsKey("claude_c2_last_pct")) {
-    AddProviderRows(rows, "Claude", "claude", now);
+   if (snapshot.ContainsKey(QuotaTracks[ClaudeFiveHourTrackIndex].SnapshotKey + "_last_pct") ||
+       snapshot.ContainsKey(QuotaTracks[ClaudeFiveHourTrackIndex + WeeklyTrackOffset].SnapshotKey + "_last_pct")) {
+    AddProviderRows(rows, "Claude", ClaudeFiveHourTrackIndex, now);
    }
    rows.Add(new QuotaPopup.Row(QuotaPopup.RowKind.Notice,
     snapshotWrittenAt == DateTimeOffset.MinValue ? "Waiting for quota data." : "Quota data is stale."));
   } else {
-   AddProviderRows(rows, "Claude", "claude", now);
-   AddProviderRows(rows, "Codex", "codex", now);
+   AddProviderRows(rows, "Claude", ClaudeFiveHourTrackIndex, now);
+   AddProviderRows(rows, "Codex", CodexFiveHourTrackIndex, now);
   }
   return rows;
  }
- private void AddProviderRows(List<QuotaPopup.Row> rows, string title, string provider, DateTimeOffset now) {
+ private void AddProviderRows(List<QuotaPopup.Row> rows, string title, int fiveHourTrackIndex, DateTimeOffset now) {
+  QuotaTrack fiveHourTrack = QuotaTracks[fiveHourTrackIndex];
+  QuotaTrack weeklyTrack = QuotaTracks[fiveHourTrackIndex + WeeklyTrackOffset];
+  string providerKey = fiveHourTrack.ProviderKey;
   rows.Add(new QuotaPopup.Row(QuotaPopup.RowKind.Heading, title));
-  if (SnapshotValue(provider + "_status") != "ok") {
-   string message = SnapshotValue(provider + "_msg");
+  if (SnapshotValue(providerKey + "_status") != "ok") {
+   string message = SnapshotValue(providerKey + "_msg");
    rows.Add(new QuotaPopup.Row(QuotaPopup.RowKind.Notice,
     String.IsNullOrWhiteSpace(message) ? "Quota data unavailable." : message));
    return;
   }
-  rows.Add(CreatePeriodRow(provider + "_c1", "5h", QuotaPopup.RowKind.FiveHour, now));
-  rows.Add(CreatePeriodRow(provider + "_c2", "7d", QuotaPopup.RowKind.Weekly, now));
+  rows.Add(CreatePeriodRow(fiveHourTrack, now));
+  rows.Add(CreatePeriodRow(weeklyTrack, now));
  }
- private QuotaPopup.Row CreatePeriodRow(string quotaKey, string defaultLabel, QuotaPopup.RowKind kind, DateTimeOffset now) {
+ private QuotaPopup.Row CreatePeriodRow(QuotaTrack track, DateTimeOffset now) {
+  string quotaKey = track.SnapshotKey;
+  QuotaPopup.RowKind kind = track.Period;
   string label = SnapshotValue(quotaKey + "_label");
-  if (String.IsNullOrWhiteSpace(label)) label = defaultLabel;
+  if (String.IsNullOrWhiteSpace(label)) label = track.DefaultLabel;
   DateTimeOffset? resetAt = ReadResetTime(snapshot, quotaKey);
   int percent;
-  bool current = HasFreshSnapshot(now) && !(resetAt <= now) &&
+  bool hasCurrentUsage = HasFreshSnapshot(now) && !(resetAt <= now) &&
    !(ReadTimestamp(snapshot, quotaKey + "_fresh_until") <= now);
-  if (!current && TryReadPercent(snapshot, quotaKey + "_last_pct", out percent)) {
+  if (!hasCurrentUsage && TryReadPercent(snapshot, quotaKey + "_last_pct", out percent)) {
    DateTimeOffset? observedAt = ReadTimestamp(snapshot, quotaKey + "_observed_at");
    string note = observedAt.HasValue ? "Last known · " + observedAt.Value.LocalDateTime.ToString("g") : "Last known";
    return new QuotaPopup.Row(kind, label, percent + "%", note: note);
   }
-  if (!current) return new QuotaPopup.Row(kind, label, note: "Waiting for fresh usage data.");
+  if (!hasCurrentUsage) return new QuotaPopup.Row(kind, label, note: "Waiting for fresh usage data.");
   if (!TryReadPercent(snapshot, quotaKey + "_pct", out percent)) {
    return new QuotaPopup.Row(kind, label, note: "Quota data unavailable.");
   }

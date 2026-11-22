@@ -44,14 +44,14 @@ jobs:
         run: |
           $ErrorActionPreference = 'Stop'
           $version = (Get-Content -LiteralPath VERSION -Raw).Trim()
-          .\packaging\Sign-UpdateFeed.ps1 -Version $version -Installer ".\dist\AgentMeter-Taskbar-Setup-v$version.exe"
+          .\build\release\Sign-UpdateFeed.ps1 -Version $version -Installer ".\dist\AgentMeter-Taskbar-Setup-v$version.exe"
       - name: Verify with the installed updater's public key
         shell: powershell
         run: |
           $ErrorActionPreference = 'Stop'
-          . .\packaging\UpdateManifest.ps1
+          . .\src\Updater\UpdateManifest.ps1
           $version = (Get-Content -LiteralPath VERSION -Raw).Trim()
-          $publicKey = Get-Content -LiteralPath .\packaging\update-public.xml -Raw
+          $publicKey = Get-Content -LiteralPath .\src\Updater\update-public.xml -Raw
           $manifest = Read-VerifiedUpdate (Get-Content -LiteralPath .\dist\agentmeter-update.json -Raw) $publicKey ([version]'0.0.0')
           if (!$manifest -or $manifest.version -cne $version) { throw 'The signed update version does not match VERSION.' }
           $installerName = "AgentMeter-Taskbar-Setup-v$version.exe"
@@ -89,4 +89,4 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          .\packaging\Publish-Release.ps1 -AssetDirectory .\dist -Commit $env:GITHUB_SHA -Repository $env:GITHUB_REPOSITORY
+          .\build\release\Publish-Release.ps1 -AssetDirectory .\dist -Commit $env:GITHUB_SHA -Repository $env:GITHUB_REPOSITORY

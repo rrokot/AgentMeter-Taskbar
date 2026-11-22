@@ -16,7 +16,7 @@ function Write-QuotaJson($Path, $Value) {
     }
 }
 
-function ConvertTo-QuotaDate($Value) {
+function ConvertTo-QuotaTimestamp($Value) {
     if ($Value -is [DateTimeOffset] -or $Value -is [DateTime]) {
         return [DateTimeOffset]$Value
     }
@@ -26,7 +26,7 @@ function ConvertTo-QuotaDate($Value) {
     }
 }
 
-function ConvertFrom-UnixTime($Value) {
+function ConvertFrom-UnixSeconds($Value) {
     $unixSeconds = 0L
     if ([long]::TryParse([string]$Value, [ref]$unixSeconds) -and $unixSeconds -gt 0 -and
         $unixSeconds -le [DateTimeOffset]::MaxValue.ToUnixTimeSeconds()) {
@@ -38,7 +38,7 @@ function ConvertTo-QuotaWindow($Percent, $Reset) {
     $usagePercent = 0.0
     if ([double]::TryParse([string]$Percent, [Globalization.NumberStyles]::Float, $invariantCulture, [ref]$usagePercent) -and
         $usagePercent -ge 0 -and ![double]::IsInfinity($usagePercent)) {
-        $resetAt = ConvertTo-QuotaDate $Reset
+        $resetAt = ConvertTo-QuotaTimestamp $Reset
         return @{
             percent = [int][Math]::Floor([Math]::Min(100.0, $usagePercent))
             reset = if ($resetAt) { $resetAt.ToString('o', $invariantCulture) } else { '' }
@@ -46,9 +46,10 @@ function ConvertTo-QuotaWindow($Percent, $Reset) {
     }
 }
 
-$ClaudeQuotaPeriods = @(
-    @{ Field = 'five_hour'; Label = '5h' }
-    @{ Field = 'seven_day'; Label = '7d' }
+# Older toolbar DLLs use these snapshot slots while Explorer still has them loaded.
+$QuotaPeriods = @(
+    @{ Name = 'FiveHour'; StatusLineField = 'five_hour'; DisplayLabel = '5h'; SnapshotSlot = 'c1' }
+    @{ Name = 'Weekly'; StatusLineField = 'seven_day'; DisplayLabel = '7d'; SnapshotSlot = 'c2' }
 )
 
 function Open-QuotaWriterLock($Path) {

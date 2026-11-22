@@ -1,5 +1,5 @@
 # Written for Pester 3.4, the version bundled with Windows PowerShell 5.1.
-. (Join-Path $PSScriptRoot '..\src\RefreshQuota.ps1')
+. (Join-Path $PSScriptRoot '..\src\Collector\RefreshQuota.ps1')
 
 function New-TestDirectory {
     $path = Join-Path $TestDrive ([Guid]::NewGuid().ToString('N'))
@@ -35,22 +35,22 @@ Describe 'ConvertTo-QuotaWindow' {
     }
 }
 
-Describe 'ConvertFrom-UnixTime' {
+Describe 'ConvertFrom-UnixSeconds' {
     It 'converts seconds since the epoch' {
-        (ConvertFrom-UnixTime 1700000000).ToUnixTimeSeconds() | Should Be 1700000000
+        (ConvertFrom-UnixSeconds 1700000000).ToUnixTimeSeconds() | Should Be 1700000000
     }
     It 'rejects zero and text' {
-        ConvertFrom-UnixTime 0 | Should BeNullOrEmpty
-        ConvertFrom-UnixTime 'later' | Should BeNullOrEmpty
+        ConvertFrom-UnixSeconds 0 | Should BeNullOrEmpty
+        ConvertFrom-UnixSeconds 'later' | Should BeNullOrEmpty
     }
 }
 
-Describe 'Add-Limits' {
+Describe 'Add-ProviderQuotaFields' {
     $now = [DateTimeOffset]::UtcNow
 
     It 'reports an error with the message when there is no data' {
         $output = @{}
-        Add-Limits $output 'codex' @($null, $null) 'Start Codex.' $now
+        Add-ProviderQuotaFields $output 'codex' @{} 'Start Codex.' $now
         $output.codex_status | Should Be 'error'
         $output.codex_msg | Should Be 'Start Codex.'
         $output.codex_c1_pct | Should Be ''
@@ -59,7 +59,7 @@ Describe 'Add-Limits' {
     It 'publishes the reset timestamp for a running period' {
         $reset = $now.AddHours(2).ToOffset([TimeSpan]::FromHours(2))
         $output = @{}
-        Add-Limits $output 'claude' @(@{ percent = 37; reset = $reset }, $null) 'ignored' $now
+        Add-ProviderQuotaFields $output 'claude' @{ FiveHour = @{ percent = 37; reset = $reset } } 'ignored' $now
         $output.claude_status | Should Be 'ok'
         $output.claude_msg | Should Be ''
         $output.claude_c1_label | Should Be '5h'
@@ -69,19 +69,19 @@ Describe 'Add-Limits' {
     }
     It 'keeps the timestamp but hides the percentage at the reset boundary' {
         $output = @{}
-        Add-Limits $output 'codex' @($null, @{ percent = 90; reset = $now }) '' $now
+        Add-ProviderQuotaFields $output 'codex' @{ Weekly = @{ percent = 90; reset = $now } } '' $now
         $output.codex_c2_pct | Should Be ''
         $output.codex_c2_reset_at | Should Be ($now.ToString('o'))
     }
     It 'keeps the percentage when the reset time is unknown' {
         $output = @{}
-        Add-Limits $output 'codex' @(@{ percent = 12; reset = '' }, $null) '' $now
+        Add-ProviderQuotaFields $output 'codex' @{ FiveHour = @{ percent = 12; reset = '' } } '' $now
         $output.codex_c1_pct | Should Be '12'
         $output.codex_c1_reset_at | Should Be ''
     }
 }
 
-Describe 'Get-CodexLimits' {
+Describe 'Read-CodexSessionQuotaWindows' {
     $previousCodexHome = $env:CODEX_HOME
     AfterEach { $env:CODEX_HOME = $previousCodexHome }
 
@@ -99,7 +99,7 @@ Describe 'Get-CodexLimits' {
 
     It 'returns nothing when there are no session logs' {
         $env:CODEX_HOME = New-TestDirectory
-        (Get-CodexLimits).Count | Should Be 0
+        (Read-CodexSessionQuotaWindows).Count | Should Be 0
     }
     It 'takes the record with the latest timestamp across files' {
         $env:CODEX_HOME = New-TestDirectory
@@ -107,29 +107,29 @@ Describe 'Get-CodexLimits' {
         $newerLogLine = New-CodexRateLimitLogLine '2026-01-01T12:00:00Z' @{ used_percent = 55; window_minutes = 300; resets_at = $reset } @{ used_percent = 66; window_minutes = 10080; resets_at = $reset }
         Write-TestTextFile (Join-Path $env:CODEX_HOME 'sessions\2026\rollout-a.jsonl') "$newerLogLine`n"
         Write-TestTextFile (Join-Path $env:CODEX_HOME 'sessions\2026\rollout-b.jsonl') "not json `"rate_limits`"`n$olderLogLine`n"
-        $limits = Get-CodexLimits
-        $limits['5h'].percent | Should Be 55
-        $limits['7d'].percent | Should Be 66
-        $limits['5h'].reset | Should Not BeNullOrEmpty
+        $windowsByPeriod = Read-CodexSessionQuotaWindows
+        $windowsByPeriod.FiveHour.percent | Should Be 55
+        $windowsByPeriod.Weekly.percent | Should Be 66
+        $windowsByPeriod.FiveHour.reset | Should Not BeNullOrEmpty
     }
     It 'labels a weekly limit in the primary slot by its window length' {
         $env:CODEX_HOME = New-TestDirectory
         $logLine = New-CodexRateLimitLogLine '2026-01-01T10:00:00Z' @{ used_percent = 30; window_minutes = 10080; resets_at = $reset } $null
         Write-TestTextFile (Join-Path $env:CODEX_HOME 'sessions\rollout-a.jsonl') "$logLine`n"
-        $limits = Get-CodexLimits
-        $limits.ContainsKey('5h') | Should Be $false
-        $limits['7d'].percent | Should Be 30
+        $windowsByPeriod = Read-CodexSessionQuotaWindows
+        $windowsByPeriod.ContainsKey('FiveHour') | Should Be $false
+        $windowsByPeriod.Weekly.percent | Should Be 30
     }
     It 'ignores limits that belong to another product' {
         $env:CODEX_HOME = New-TestDirectory
         $logLine = New-CodexRateLimitLogLine '2026-01-01T10:00:00Z' @{ used_percent = 30; window_minutes = 300; resets_at = $reset } $null 'other'
         Write-TestTextFile (Join-Path $env:CODEX_HOME 'sessions\rollout-a.jsonl') "$logLine`n"
-        (Get-CodexLimits).Count | Should Be 0
+        (Read-CodexSessionQuotaWindows).Count | Should Be 0
     }
 }
 
 Describe 'Claude Code status-line quotas' {
-    $publisherPath = Join-Path $PSScriptRoot '..\src\ClaudeStatusLine.ps1'
+    $publisherPath = Join-Path $PSScriptRoot '..\src\Collector\ClaudeStatusLine.ps1'
 
     function Invoke-TestStatusLine($Payload, $DataDirectory, [switch]$Quiet) {
         $powershellPath = Join-Path $PSHOME 'powershell.exe'
@@ -176,9 +176,9 @@ Describe 'Claude Code status-line quotas' {
         @($snapshot.PSObject.Properties.Name).Count | Should Be 3
         $snapshot.five_hour.reset | Should Not BeNullOrEmpty
         $snapshot.seven_day.reset | Should Be ''
-        $result = Get-ClaudeStatusLineLimits $snapshotPath ([DateTimeOffset]::UtcNow)
-        $result.limits[0].percent | Should Be 14
-        $result.limits[1].percent | Should Be 0
+        $result = Read-ClaudeStatusLineQuotaWindows $snapshotPath ([DateTimeOffset]::UtcNow)
+        $result.windowsByPeriod.FiveHour.percent | Should Be 14
+        $result.windowsByPeriod.Weekly.percent | Should Be 0
         $result.message | Should Be ''
 
         $replacement = '{"rate_limits":{"seven_day":{"used_percentage":37}}}'
@@ -200,9 +200,9 @@ Describe 'Claude Code status-line quotas' {
         }
         Invoke-TestStatusLine '{"rate_limits":{"seven_day":{"used_percentage":37}}}' $dataDirectory -Quiet | Should BeNullOrEmpty
         $now = [DateTimeOffset]::UtcNow
-        $result = Get-ClaudeStatusLineLimits $snapshotPath $now
+        $result = Read-ClaudeStatusLineQuotaWindows $snapshotPath $now
         $output = @{}
-        Add-Limits $output 'claude' $result.limits $result.message $now
+        Add-ProviderQuotaFields $output 'claude' $result.windowsByPeriod $result.message $now
         $output.claude_c1_pct | Should Be ''
         $output.claude_c1_last_pct | Should Be '14'
         $output.claude_c1_observed_at | Should Be ($previousTime.ToString('o'))
@@ -219,8 +219,8 @@ Describe 'Claude Code status-line quotas' {
 
     It 'waits for setup before a Claude session has supplied any limits' {
         $snapshotPath = Join-Path (New-TestDirectory) 'claude-usage.json'
-        $result = Get-ClaudeStatusLineLimits $snapshotPath ([DateTimeOffset]::UtcNow)
-        $result.limits[0] | Should BeNullOrEmpty
+        $result = Read-ClaudeStatusLineQuotaWindows $snapshotPath ([DateTimeOffset]::UtcNow)
+        $result.windowsByPeriod.FiveHour | Should BeNullOrEmpty
         $result.message | Should Match 'Open Usage in Claude Desktop'
     }
 
@@ -232,9 +232,9 @@ Describe 'Claude Code status-line quotas' {
             five_hour = @{ percent = 76; reset = $now.ToString('o') }
             seven_day = @{ percent = 25; reset = $now.AddDays(5).ToString('o') }
         }
-        $result = Get-ClaudeStatusLineLimits $snapshotPath $now
+        $result = Read-ClaudeStatusLineQuotaWindows $snapshotPath $now
         $output = @{}
-        Add-Limits $output 'claude' $result.limits $result.message $now
+        Add-ProviderQuotaFields $output 'claude' $result.windowsByPeriod $result.message $now
         $output.claude_c1_pct | Should Be ''
         $output.claude_c1_last_pct | Should Be '76'
         $output.claude_c2_pct | Should Be '25'
@@ -243,8 +243,8 @@ Describe 'Claude Code status-line quotas' {
             observed_at = $now.AddMinutes(-16).ToString('o')
             five_hour = @{ percent = 47 }
         }
-        $result = Get-ClaudeStatusLineLimits $snapshotPath $now
-        Add-Limits $output 'claude' $result.limits $result.message $now
+        $result = Read-ClaudeStatusLineQuotaWindows $snapshotPath $now
+        Add-ProviderQuotaFields $output 'claude' $result.windowsByPeriod $result.message $now
         $output.claude_c1_pct | Should Be ''
         $output.claude_c1_last_pct | Should Be '47'
     }
@@ -261,9 +261,9 @@ Describe 'Claude Desktop quota history' {
             @{ t = $now.AddMinutes(-5).ToUnixTimeMilliseconds(); u = @{ fh = 50; sd = 60 } }
             @{ t = $now.AddMinutes(5).ToUnixTimeMilliseconds(); u = @{ fh = 80; sd = 90 } }
         ) }
-        $result = Get-ClaudeLimits (Join-Path $directory 'claude-usage.json') $historyPath $now
+        $result = Resolve-ClaudeQuotaWindows (Join-Path $directory 'claude-usage.json') $historyPath $now
         $output = @{}
-        Add-Limits $output 'claude' $result.limits $result.message $now
+        Add-ProviderQuotaFields $output 'claude' $result.windowsByPeriod $result.message $now
         $output.claude_status | Should Be 'ok'
         $output.claude_c1_pct | Should Be '2'
         $output.claude_c2_pct | Should Be '0'
@@ -274,14 +274,14 @@ Describe 'Claude Desktop quota history' {
         $historyPath = Join-Path (New-TestDirectory) 'plan-usage-history.json'
         $oldSample = @{ t = $now.AddMinutes(-16).ToUnixTimeMilliseconds(); u = @{ fh = 10 } }
         Write-QuotaJson $historyPath @{ version = 2; samples = @($oldSample) }
-        $result = Get-ClaudeDesktopLimits $historyPath $now
+        $windowsByPeriod = Read-ClaudeDesktopQuotaWindows $historyPath $now
         $output = @{}
-        Add-Limits $output 'claude' $result.limits $result.message $now
+        Add-ProviderQuotaFields $output 'claude' $windowsByPeriod '' $now
         $output.claude_c1_pct | Should Be ''
         $output.claude_c1_last_pct | Should Be '10'
         $recentSample = @{ t = $now.AddMinutes(-1).ToUnixTimeMilliseconds(); u = @{ fh = 10 } }
         Write-QuotaJson $historyPath @{ version = 3; samples = @($recentSample) }
-        Get-ClaudeDesktopLimits $historyPath $now | Should BeNullOrEmpty
+        Read-ClaudeDesktopQuotaWindows $historyPath $now | Should BeNullOrEmpty
     }
 
     It 'prefers active status-line periods and fills missing periods from Desktop' {
@@ -294,14 +294,14 @@ Describe 'Claude Desktop quota history' {
             observed_at = $now.AddMinutes(-10).ToString('o')
             five_hour = @{ percent = 25; reset = $now.AddHours(1).ToString('o') }
         }
-        $result = Get-ClaudeLimits $statusLinePath $historyPath $now
-        $result.limits[0].percent | Should Be 25
-        $result.limits[1].percent | Should Be 34
+        $result = Resolve-ClaudeQuotaWindows $statusLinePath $historyPath $now
+        $result.windowsByPeriod.FiveHour.percent | Should Be 25
+        $result.windowsByPeriod.Weekly.percent | Should Be 34
 
         Write-TestTextFile $statusLinePath '{'
-        $result = Get-ClaudeLimits $statusLinePath $historyPath $now
-        $result.limits[0].percent | Should Be 12
-        $result.limits[1].percent | Should Be 34
+        $result = Resolve-ClaudeQuotaWindows $statusLinePath $historyPath $now
+        $result.windowsByPeriod.FiveHour.percent | Should Be 12
+        $result.windowsByPeriod.Weekly.percent | Should Be 34
     }
 
     It 'carries the last known percentages forward when the sources vanish' {
@@ -314,9 +314,9 @@ Describe 'Claude Desktop quota history' {
             claude_c2_last_pct = '0'
             claude_c2_observed_at = $now.AddDays(-2).ToString('o')
         }
-        $result = Get-ClaudeLimits $statusLinePath $historyPath $now $previous
+        $result = Resolve-ClaudeQuotaWindows $statusLinePath $historyPath $now $previous
         $output = @{}
-        Add-Limits $output 'claude' $result.limits $result.message $now
+        Add-ProviderQuotaFields $output 'claude' $result.windowsByPeriod $result.message $now
         $output.claude_status | Should Be 'ok'
         $output.claude_c1_pct | Should Be ''
         $output.claude_c1_last_pct | Should Be '23'

@@ -5,6 +5,7 @@ param(
 )
 
 $ErrorActionPreference = 'Stop'
+$projectRoot = Split-Path -Parent (Split-Path -Parent $PSScriptRoot)
 
 function Invoke-GitHubCli {
     $result = & gh @args
@@ -12,7 +13,7 @@ function Invoke-GitHubCli {
     return $result
 }
 
-$version = (Get-Content -LiteralPath (Join-Path $PSScriptRoot '..\VERSION') -Raw).Trim()
+$version = (Get-Content -LiteralPath (Join-Path $projectRoot 'VERSION') -Raw).Trim()
 if ($version -notmatch '^\d+\.\d+\.\d+$') { throw 'VERSION must contain a three-part release version.' }
 $tag = "v$version"
 $installerName = "AgentMeter-Taskbar-Setup-$tag.exe"
@@ -20,8 +21,9 @@ $installer = Join-Path $AssetDirectory $installerName
 $checksum = Join-Path $AssetDirectory "AgentMeter-Taskbar-Setup-$tag.sha256"
 $feed = Join-Path $AssetDirectory 'agentmeter-update.json'
 
-. (Join-Path $PSScriptRoot 'UpdateManifest.ps1')
-$publicKey = Get-Content -LiteralPath (Join-Path $PSScriptRoot 'update-public.xml') -Raw
+$updaterSources = Join-Path $projectRoot 'src\Updater'
+. (Join-Path $updaterSources 'UpdateManifest.ps1')
+$publicKey = Get-Content -LiteralPath (Join-Path $updaterSources 'update-public.xml') -Raw
 $manifest = Read-VerifiedUpdate (Get-Content -LiteralPath $feed -Raw) $publicKey ([version]'0.0.0')
 if (!$manifest -or $manifest.version -cne $version) { throw 'The update manifest does not match VERSION.' }
 Assert-UpdateInstallerHash $installer $manifest.sha256

@@ -5,15 +5,13 @@ using System.Runtime.InteropServices;
 [assembly: System.Reflection.AssemblyVersion("1.0.0.0")]
 
 [ComVisible(true), Guid("EA143E8E-217B-4B86-925B-37EA04848915"), ClassInterface(ClassInterfaceType.None)]
-public sealed class AgentMeterBand : IDeskBand, IDeskBand2, IDockingWindow, IChildWindow, ISite, IPersist, IPersistStream {
+public sealed class AgentMeterBand : IDeskBand, IDeskBand2, IDockingWindow, IOleWindow, IObjectWithSite, IPersist, IPersistStream {
  private const int NoInterface = unchecked((int)0x80004002);
  private const int InvalidWindowHandle = unchecked((int)0x80070006);
  private const int SiteUnavailable = unchecked((int)0x80004005);
  private const int NotImplemented = unchecked((int)0x80004001);
  private const int PersistedStateIsClean = 1;
  private const uint VerticalBandMode = 1;
- private const uint MinimumSizeMask = 1, MaximumSizeMask = 2, IntegralSizeMask = 4, ActualSizeMask = 8;
- private const uint TitleMask = 16, ModeFlagsMask = 32, BackgroundColorMask = 64;
  private const uint VariableHeightModeFlag = 0x0008;
  private const int MinimumHorizontalLength = 70, MinimumHorizontalThickness = 14, PreferredHorizontalThickness = 26;
  private const int VerticalBandLength = 116, VerticalBandThickness = 48;
@@ -27,7 +25,7 @@ public sealed class AgentMeterBand : IDeskBand, IDeskBand2, IDockingWindow, IChi
   site = null;
   if (value == null) return 0;
   try {
-   var parentSite = value as IChildWindow;
+   var parentSite = value as IOleWindow;
    if (parentSite == null) return NoInterface;
    IntPtr parentWindow;
    int result = parentSite.GetWindow(out parentWindow);
@@ -58,22 +56,22 @@ public sealed class AgentMeterBand : IDeskBand, IDeskBand2, IDockingWindow, IChi
  public int CloseDW(uint reserved) { if (view != null) { view.Dispose(); view = null; } return 0; }
  public int ResizeBorderDW(IntPtr rect, IntPtr site, int reserved) { return NotImplemented; }
  public int ContextSensitiveHelp(int enter) { return NotImplemented; }
- public int GetBandInfo(uint id, uint mode, ref BandInfo info) {
+ public int GetBandInfo(uint bandId, uint viewMode, ref DeskBandInfo info) {
   uint dpi = view == null ? QuotaView.DefaultDpi : GetDpiForWindow(view.Handle);
   if (dpi == 0) dpi = QuotaView.DefaultDpi;
-  isVerticalTaskbar = (mode & VerticalBandMode) != 0;
+  isVerticalTaskbar = (viewMode & VerticalBandMode) != 0;
   if (view != null) view.SetTaskbarOrientation(isVerticalTaskbar);
   // The shell measures rebar length along the taskbar and thickness across it.
   var minimumSize = isVerticalTaskbar ? ScaleBandSize(VerticalBandLength, VerticalBandThickness, dpi)
    : ScaleBandSize(MinimumHorizontalLength, MinimumHorizontalThickness, dpi);
   var preferredSize = isVerticalTaskbar ? minimumSize
    : ScaleBandSize(QuotaView.PreferredHorizontalLength, PreferredHorizontalThickness, dpi);
-  if ((info.Mask & MinimumSizeMask) != 0) info.Min = minimumSize;
-  if ((info.Mask & MaximumSizeMask) != 0) info.Max = new Point(-1, -1);
-  if ((info.Mask & IntegralSizeMask) != 0) info.Integral = new Point(1, 1);
-  if ((info.Mask & ActualSizeMask) != 0) info.Actual = preferredSize;
-  if ((info.Mask & ModeFlagsMask) != 0) info.ModeFlags = isVerticalTaskbar ? 0u : VariableHeightModeFlag;
-  info.Mask &= ~(TitleMask | BackgroundColorMask);
+  if ((info.Fields & DeskBandFields.MinimumSize) != 0) info.MinimumSize = minimumSize;
+  if ((info.Fields & DeskBandFields.MaximumSize) != 0) info.MaximumSize = new Point(-1, -1);
+  if ((info.Fields & DeskBandFields.ResizeIncrement) != 0) info.ResizeIncrement = new Point(1, 1);
+  if ((info.Fields & DeskBandFields.PreferredSize) != 0) info.PreferredSize = preferredSize;
+  if ((info.Fields & DeskBandFields.ModeFlags) != 0) info.ModeFlags = isVerticalTaskbar ? 0u : VariableHeightModeFlag;
+  info.Fields &= ~(DeskBandFields.Title | DeskBandFields.BackgroundColor);
   return 0;
  }
  private static Point ScaleBandSize(int length, int thickness, uint dpi) {

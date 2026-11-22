@@ -5,7 +5,7 @@ $ErrorActionPreference = 'Stop'
 
 $maximumClaudeQuotaAgeWithoutReset = [TimeSpan]::FromMinutes(15)
 
-function Get-CodexLimits {
+function Read-CodexSessionQuotaWindows {
     $codexHome = if ($env:CODEX_HOME) { $env:CODEX_HOME } else { Join-Path $env:USERPROFILE '.codex' }
     $recentSessionLogCount = 10
     $sessionLogs = Get-ChildItem -LiteralPath (Join-Path $codexHome 'sessions') -Filter 'rollout-*.jsonl' -File -Recurse -ErrorAction SilentlyContinue |
@@ -25,22 +25,22 @@ function Get-CodexLimits {
                     if (!$rateLimits -or ($rateLimits.limit_id -and $rateLimits.limit_id -ne 'codex') -or
                         ($record.payload.type -and $record.payload.type -ne 'token_count')) { continue }
 
-                    $recordTimestamp = ConvertTo-QuotaDate $record.timestamp
+                    $recordTimestamp = ConvertTo-QuotaTimestamp $record.timestamp
                     if (!$recordTimestamp) { $recordTimestamp = [DateTimeOffset]$sessionLog.LastWriteTimeUtc }
                     if ($recordTimestamp -lt $latestLimitTimestamp) { continue }
 
                     $quotaWindows = @{}
                     foreach ($windowSlot in 'primary', 'secondary') {
                         $rawWindow = $rateLimits.$windowSlot
-                        $periodLabel = switch ([string]$rawWindow.window_minutes) {
-                            '300' { '5h' }
-                            '10080' { '7d' }
-                            '' { if ($windowSlot -eq 'primary') { '5h' } else { '7d' } }
+                        $periodName = switch ([string]$rawWindow.window_minutes) {
+                            '300' { 'FiveHour' }
+                            '10080' { 'Weekly' }
+                            '' { if ($windowSlot -eq 'primary') { 'FiveHour' } else { 'Weekly' } }
                         }
-                        if ($periodLabel) {
-                            $resetAt = ConvertFrom-UnixTime $rawWindow.resets_at
+                        if ($periodName) {
+                            $resetAt = ConvertFrom-UnixSeconds $rawWindow.resets_at
                             $quotaWindow = ConvertTo-QuotaWindow $rawWindow.used_percent $resetAt
-                            if ($quotaWindow) { $quotaWindows[$periodLabel] = $quotaWindow }
+                            if ($quotaWindow) { $quotaWindows[$periodName] = $quotaWindow }
                         }
                     }
                     if ($quotaWindows.Count) {
@@ -62,101 +62,102 @@ function ConvertTo-ClaudeQuotaObservation($Percent, $Reset, [DateTimeOffset]$Obs
     $quota = ConvertTo-QuotaWindow $Percent $Reset
     if (!$quota) { return }
     $quota.observedAt = $ObservedAt
-    $quota.freshUntil = if ($quota.reset) { ConvertTo-QuotaDate $quota.reset } else { $ObservedAt + $maximumClaudeQuotaAgeWithoutReset }
+    $quota.freshUntil = if ($quota.reset) { ConvertTo-QuotaTimestamp $quota.reset } else { $ObservedAt + $maximumClaudeQuotaAgeWithoutReset }
     return $quota
 }
 
-function Get-ClaudeStatusLineLimits($SnapshotPath, [DateTimeOffset]$Now) {
+function Read-ClaudeStatusLineQuotaWindows($SnapshotPath, [DateTimeOffset]$Now) {
     $result = @{
-        limits = @($null, $null)
+        windowsByPeriod = @{}
         message = 'Open Usage in Claude Desktop or enable the AgentMeter status line in Claude Code.'
     }
     if (!(Test-Path -LiteralPath $SnapshotPath -PathType Leaf)) { return $result }
 
     $snapshot = Read-QuotaJson $SnapshotPath
-    $snapshotTime = ConvertTo-QuotaDate $snapshot.observed_at
+    $snapshotTime = ConvertTo-QuotaTimestamp $snapshot.observed_at
     $result.message = 'Waiting for current Claude usage. Open Usage in Claude Desktop or run a turn in Claude Code.'
-    for ($index = 0; $index -lt $ClaudeQuotaPeriods.Count; $index++) {
-        $period = $ClaudeQuotaPeriods[$index]
-        $rawWindow = $snapshot.($period.Field)
-        $observedAt = ConvertTo-QuotaDate $rawWindow.observed_at
+    foreach ($period in $QuotaPeriods) {
+        $rawWindow = $snapshot.($period.StatusLineField)
+        $observedAt = ConvertTo-QuotaTimestamp $rawWindow.observed_at
         if (!$observedAt) { $observedAt = $snapshotTime }
         if (!$observedAt -or $observedAt -gt $Now) { continue }
-        $result.limits[$index] = ConvertTo-ClaudeQuotaObservation $rawWindow.percent $rawWindow.reset $observedAt
+        $quotaWindow = ConvertTo-ClaudeQuotaObservation $rawWindow.percent $rawWindow.reset $observedAt
+        if ($quotaWindow) { $result.windowsByPeriod[$period.Name] = $quotaWindow }
     }
-    if ($result.limits[0] -or $result.limits[1]) { $result.message = '' }
+    if ($result.windowsByPeriod.Count) { $result.message = '' }
     return $result
 }
 
-function Get-ClaudeDesktopLimits($HistoryPath, [DateTimeOffset]$Now) {
+function Read-ClaudeDesktopQuotaWindows($HistoryPath, [DateTimeOffset]$Now) {
     if (!(Test-Path -LiteralPath $HistoryPath -PathType Leaf)) { return }
     $history = Read-QuotaJson $HistoryPath
     if ($history.version -ne 2 -or $history.samples -isnot [array]) { return }
 
-    $latestSampleTime = $Now.ToUnixTimeMilliseconds()
-    $newestSampleTime = 1L
+    $nowUnixMilliseconds = $Now.ToUnixTimeMilliseconds()
+    $newestSampleUnixMilliseconds = 1L
     $newestSample = $null
     foreach ($sample in $history.samples) {
-        $sampleTime = 0L
-        if (![long]::TryParse([string]$sample.t, [ref]$sampleTime) -or
-            $sampleTime -lt $newestSampleTime -or $sampleTime -gt $latestSampleTime) { continue }
-        $newestSampleTime = $sampleTime
+        $sampleUnixMilliseconds = 0L
+        if (![long]::TryParse([string]$sample.t, [ref]$sampleUnixMilliseconds) -or
+            $sampleUnixMilliseconds -lt $newestSampleUnixMilliseconds -or $sampleUnixMilliseconds -gt $nowUnixMilliseconds) { continue }
+        $newestSampleUnixMilliseconds = $sampleUnixMilliseconds
         $newestSample = $sample
     }
     if (!$newestSample) { return }
 
     # Desktop history stores percentages with no reset timestamps.
-    $observedAt = [DateTimeOffset]::FromUnixTimeMilliseconds($newestSampleTime)
+    $observedAt = [DateTimeOffset]::FromUnixTimeMilliseconds($newestSampleUnixMilliseconds)
     $fiveHour = ConvertTo-ClaudeQuotaObservation $newestSample.u.fh $null $observedAt
     $weekly = ConvertTo-ClaudeQuotaObservation $newestSample.u.sd $null $observedAt
-    if ($fiveHour -or $weekly) {
-        return @{ limits = @($fiveHour, $weekly); message = '' }
-    }
+    $windowsByPeriod = @{}
+    if ($fiveHour) { $windowsByPeriod.FiveHour = $fiveHour }
+    if ($weekly) { $windowsByPeriod.Weekly = $weekly }
+    if ($windowsByPeriod.Count) { return $windowsByPeriod }
 }
 
-function Get-ClaudeLimits($StatusLinePath, $DesktopHistoryPath, [DateTimeOffset]$Now, $PreviousSnapshot) {
-    try { $statusLine = Get-ClaudeStatusLineLimits $StatusLinePath $Now }
-    catch { $statusLine = @{ limits = @($null, $null); message = 'Claude Code status-line data could not be read.' } }
-    try { $desktop = Get-ClaudeDesktopLimits $DesktopHistoryPath $Now }
-    catch { $desktop = $null }
+function Resolve-ClaudeQuotaWindows($StatusLinePath, $DesktopHistoryPath, [DateTimeOffset]$Now, $PreviousSnapshot) {
+    try { $statusLine = Read-ClaudeStatusLineQuotaWindows $StatusLinePath $Now }
+    catch { $statusLine = @{ windowsByPeriod = @{}; message = 'Claude Code status-line data could not be read.' } }
+    try { $desktopWindows = Read-ClaudeDesktopQuotaWindows $DesktopHistoryPath $Now }
+    catch { $desktopWindows = $null }
 
-    $limits = @($null, $null)
-    for ($index = 0; $index -lt $limits.Count; $index++) {
-        $periodKey = "claude_c$($index + 1)"
-        $savedObservation = ConvertTo-QuotaDate $PreviousSnapshot.("${periodKey}_observed_at")
+    $windowsByPeriod = @{}
+    foreach ($period in $QuotaPeriods) {
+        $periodKey = "claude_$($period.SnapshotSlot)"
+        $savedObservation = ConvertTo-QuotaTimestamp $PreviousSnapshot.("${periodKey}_observed_at")
         $saved = if ($savedObservation -and $savedObservation -le $Now) {
             ConvertTo-ClaudeQuotaObservation $PreviousSnapshot.("${periodKey}_last_pct") $PreviousSnapshot.("${periodKey}_reset_at") $savedObservation
         }
-        $desktopWindow = if ($desktop) { $desktop.limits[$index] }
-        $observations = @($statusLine.limits[$index], $desktopWindow, $saved) | Where-Object { $_ }
-        $active = $observations | Where-Object { $_.freshUntil -gt $Now } | Select-Object -First 1
-        $limits[$index] = if ($active) { $active } else {
+        $desktopWindow = if ($desktopWindows) { $desktopWindows[$period.Name] }
+        $observations = @($statusLine.windowsByPeriod[$period.Name], $desktopWindow, $saved) | Where-Object { $_ }
+        $currentWindow = $observations | Where-Object { $_.freshUntil -gt $Now } | Select-Object -First 1
+        $selectedWindow = if ($currentWindow) { $currentWindow } else {
             $observations | Sort-Object -Property @{ Expression = { $_.observedAt }; Descending = $true } | Select-Object -First 1
         }
+        if ($selectedWindow) { $windowsByPeriod[$period.Name] = $selectedWindow }
     }
-    return @{ limits = $limits; message = $statusLine.message }
+    return @{ windowsByPeriod = $windowsByPeriod; message = $statusLine.message }
 }
 
-function Add-Limits($Output, $Provider, $Limits, $Message, $Now) {
-    $periodLabels = @('5h', '7d')
-    $hasAnyLimits = $Limits[0] -or $Limits[1]
-    $Output["${Provider}_status"] = if ($hasAnyLimits) { 'ok' } else { 'error' }
-    $Output["${Provider}_msg"] = if ($hasAnyLimits) { '' } else { $Message }
-    for ($periodIndex = 0; $periodIndex -lt $periodLabels.Count; $periodIndex++) {
-        $periodKey = "${Provider}_c$($periodIndex + 1)"
-        $Output["${periodKey}_label"] = $periodLabels[$periodIndex]
-        $Output["${periodKey}_pct"] = ''
-        $quotaWindow = $Limits[$periodIndex]
-        $resetAt = if ($quotaWindow) { ConvertTo-QuotaDate $quotaWindow.reset }
-        $Output["${periodKey}_reset_at"] = if ($resetAt) { $resetAt.ToString('o', $invariantCulture) } else { '' }
+function Add-ProviderQuotaFields($Snapshot, $ProviderKey, $WindowsByPeriod, $ProviderMessage, [DateTimeOffset]$Now) {
+    $hasAnyLimits = $WindowsByPeriod.Count -gt 0
+    $Snapshot["${ProviderKey}_status"] = if ($hasAnyLimits) { 'ok' } else { 'error' }
+    $Snapshot["${ProviderKey}_msg"] = if ($hasAnyLimits) { '' } else { $ProviderMessage }
+    foreach ($period in $QuotaPeriods) {
+        $periodKey = "${ProviderKey}_$($period.SnapshotSlot)"
+        $Snapshot["${periodKey}_label"] = $period.DisplayLabel
+        $Snapshot["${periodKey}_pct"] = ''
+        $quotaWindow = $WindowsByPeriod[$period.Name]
+        $resetAt = if ($quotaWindow) { ConvertTo-QuotaTimestamp $quotaWindow.reset }
+        $Snapshot["${periodKey}_reset_at"] = if ($resetAt) { $resetAt.ToString('o', $invariantCulture) } else { '' }
         $freshUntil = if ($quotaWindow) { $quotaWindow.freshUntil }
         if ($quotaWindow.observedAt) {
-            $Output["${periodKey}_last_pct"] = [string]$quotaWindow.percent
-            $Output["${periodKey}_observed_at"] = $quotaWindow.observedAt.ToString('o', $invariantCulture)
-            $Output["${periodKey}_fresh_until"] = $freshUntil.ToString('o', $invariantCulture)
+            $Snapshot["${periodKey}_last_pct"] = [string]$quotaWindow.percent
+            $Snapshot["${periodKey}_observed_at"] = $quotaWindow.observedAt.ToString('o', $invariantCulture)
+            $Snapshot["${periodKey}_fresh_until"] = $freshUntil.ToString('o', $invariantCulture)
         }
         if ($quotaWindow -and (!$resetAt -or $resetAt -gt $Now) -and (!$freshUntil -or $freshUntil -gt $Now)) {
-            $Output["${periodKey}_pct"] = [string]$quotaWindow.percent
+            $Snapshot["${periodKey}_pct"] = [string]$quotaWindow.percent
         }
     }
 }
@@ -172,7 +173,7 @@ if (!$collectorLock) { return }
 try {
     $codexLimitsByPeriod = @{}
     $codexMessage = 'Start a Codex CLI session with a ChatGPT subscription to refresh usage.'
-    try { $codexLimitsByPeriod = Get-CodexLimits }
+    try { $codexLimitsByPeriod = Read-CodexSessionQuotaWindows }
     catch { $codexMessage = 'Codex session logs could not be read.' }
     $now = [DateTimeOffset]::UtcNow
     $snapshotPath = Join-Path $DataDirectory 'data.json'
@@ -180,11 +181,11 @@ try {
     try { $previousSnapshot = Read-QuotaJson $snapshotPath }
     catch { }
     $desktopHistoryPath = Join-Path ([Environment]::GetFolderPath('ApplicationData')) 'Claude\plan-usage-history.json'
-    $claudeResult = Get-ClaudeLimits (Join-Path $DataDirectory 'claude-usage.json') $desktopHistoryPath $now $previousSnapshot
+    $claudeResult = Resolve-ClaudeQuotaWindows (Join-Path $DataDirectory 'claude-usage.json') $desktopHistoryPath $now $previousSnapshot
 
     $snapshot = @{ updated_at = $now.ToString('o', $invariantCulture) }
-    Add-Limits $snapshot 'codex' @($codexLimitsByPeriod['5h'], $codexLimitsByPeriod['7d']) $codexMessage $now
-    Add-Limits $snapshot 'claude' $claudeResult.limits $claudeResult.message $now
+    Add-ProviderQuotaFields $snapshot 'codex' $codexLimitsByPeriod $codexMessage $now
+    Add-ProviderQuotaFields $snapshot 'claude' $claudeResult.windowsByPeriod $claudeResult.message $now
     Write-QuotaJson $snapshotPath $snapshot
 } finally {
     $collectorLock.Dispose()

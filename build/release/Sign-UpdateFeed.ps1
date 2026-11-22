@@ -4,11 +4,12 @@ param(
 )
 
 $ErrorActionPreference = 'Stop'
+$projectRoot = Split-Path -Parent (Split-Path -Parent $PSScriptRoot)
 $installerFile = Get-Item -LiteralPath $Installer
 if ($installerFile.Name -ne "AgentMeter-Taskbar-Setup-v$Version.exe") {
     throw 'Installer filename does not match the release version.'
 }
-$publicKey = (Get-Content -LiteralPath (Join-Path $PSScriptRoot 'update-public.xml') -Raw).Trim()
+$publicKey = (Get-Content -LiteralPath (Join-Path $projectRoot 'src\Updater\update-public.xml') -Raw).Trim()
 $manifest = @{
     schema = 1
     version = $Version

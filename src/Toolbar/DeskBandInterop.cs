@@ -3,7 +3,7 @@ using System.Drawing;
 using System.Runtime.InteropServices;
 
 [ComImport, Guid("00000114-0000-0000-C000-000000000046"), InterfaceType(ComInterfaceType.InterfaceIsIUnknown)]
-public interface IChildWindow {
+public interface IOleWindow {
  [PreserveSig] int GetWindow(out IntPtr window);
  [PreserveSig] int ContextSensitiveHelp(int enter);
 }
@@ -22,7 +22,7 @@ public interface IDeskBand2 {
  [PreserveSig] int ShowDW(int show);
  [PreserveSig] int CloseDW(uint reserved);
  [PreserveSig] int ResizeBorderDW(IntPtr rect, IntPtr site, int reserved);
- [PreserveSig] int GetBandInfo(uint id, uint mode, ref BandInfo info);
+ [PreserveSig] int GetBandInfo(uint bandId, uint viewMode, ref DeskBandInfo info);
  [PreserveSig] int CanRenderComposited(out int can);
  [PreserveSig] int SetCompositionState(int enabled);
  [PreserveSig] int GetCompositionState(out int enabled);
@@ -34,10 +34,10 @@ public interface IDeskBand {
  [PreserveSig] int ShowDW(int show);
  [PreserveSig] int CloseDW(uint reserved);
  [PreserveSig] int ResizeBorderDW(IntPtr rect, IntPtr site, int reserved);
- [PreserveSig] int GetBandInfo(uint id, uint mode, ref BandInfo info);
+ [PreserveSig] int GetBandInfo(uint bandId, uint viewMode, ref DeskBandInfo info);
 }
 [ComVisible(true), Guid("FC4801A3-2BA9-11CF-A229-00AA003D7352"), InterfaceType(ComInterfaceType.InterfaceIsIUnknown)]
-public interface ISite {
+public interface IObjectWithSite {
  [PreserveSig] int SetSite([MarshalAs(UnmanagedType.IUnknown)] object site);
  [PreserveSig] int GetSite(ref Guid iid, out IntPtr site);
 }
@@ -54,10 +54,22 @@ public interface IPersistStream {
  [PreserveSig] int Save(IntPtr stream, int clearDirty);
  [PreserveSig] int GetSizeMax(out long size);
 }
+[Flags]
+public enum DeskBandFields : uint {
+ MinimumSize = 1,
+ MaximumSize = 2,
+ ResizeIncrement = 4,
+ PreferredSize = 8,
+ Title = 16,
+ ModeFlags = 32,
+ BackgroundColor = 64
+}
+
+// Field order and string capacity match the Windows DESKBANDINFO layout.
 [StructLayout(LayoutKind.Sequential, CharSet=CharSet.Unicode)]
-public struct BandInfo {
- public uint Mask;
- public Point Min, Max, Integral, Actual;
+public struct DeskBandInfo {
+ public DeskBandFields Fields;
+ public Point MinimumSize, MaximumSize, ResizeIncrement, PreferredSize;
  [MarshalAs(UnmanagedType.ByValTStr, SizeConst=256)] public string Title;
- public uint ModeFlags, Background;
+ public uint ModeFlags, BackgroundColor;
 }

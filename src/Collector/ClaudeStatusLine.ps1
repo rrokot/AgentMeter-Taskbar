@@ -15,14 +15,14 @@ catch { return }
 
 $observedAt = [DateTimeOffset]::UtcNow
 $snapshot = @{ observed_at = $observedAt.ToString('o', $invariantCulture) }
-$summary = foreach ($period in $ClaudeQuotaPeriods) {
-    $statusWindow = $status.rate_limits.($period.Field)
-    $resetAt = ConvertFrom-UnixTime $statusWindow.resets_at
+$summary = foreach ($period in $QuotaPeriods) {
+    $statusWindow = $status.rate_limits.($period.StatusLineField)
+    $resetAt = ConvertFrom-UnixSeconds $statusWindow.resets_at
     $quota = ConvertTo-QuotaWindow $statusWindow.used_percentage $resetAt
     if ($quota) {
         $quota.observed_at = $snapshot.observed_at
-        $snapshot[$period.Field] = $quota
-        '{0}: {1}%' -f $period.Label, $quota.percent
+        $snapshot[$period.StatusLineField] = $quota
+        '{0}: {1}%' -f $period.DisplayLabel, $quota.percent
     }
 }
 if (!$summary) { return }
@@ -38,14 +38,14 @@ try {
         $previous = $null
         try { $previous = Read-QuotaJson $snapshotPath }
         catch { }
-        $previousSnapshotTime = ConvertTo-QuotaDate $previous.observed_at
+        $previousSnapshotTime = ConvertTo-QuotaTimestamp $previous.observed_at
         if ($previousSnapshotTime -gt $observedAt) {
             $snapshot.observed_at = $previousSnapshotTime.ToString('o', $invariantCulture)
         }
-        foreach ($period in $ClaudeQuotaPeriods) {
-            $field = $period.Field
+        foreach ($period in $QuotaPeriods) {
+            $field = $period.StatusLineField
             $previousWindow = $previous.$field
-            $previousWindowTime = ConvertTo-QuotaDate $previousWindow.observed_at
+            $previousWindowTime = ConvertTo-QuotaTimestamp $previousWindow.observed_at
             if (!$previousWindowTime) { $previousWindowTime = $previousSnapshotTime }
             if (!$previousWindow -or !$previousWindowTime -or
                 ($snapshot[$field] -and $previousWindowTime -le $observedAt)) { continue }

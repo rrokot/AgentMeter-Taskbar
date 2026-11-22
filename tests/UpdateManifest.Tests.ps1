@@ -1,4 +1,4 @@
-. (Join-Path $PSScriptRoot '..\packaging\UpdateManifest.ps1')
+. (Join-Path $PSScriptRoot '..\src\Updater\UpdateManifest.ps1')
 
 Describe 'Signed update feed' {
     BeforeEach {

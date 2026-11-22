@@ -2,7 +2,7 @@ Describe 'AgentMeterBand' {
     BeforeAll {
         $version = (Get-Content -LiteralPath (Join-Path $PSScriptRoot '..\VERSION') -Raw).Trim()
         $toolbarDll = Join-Path $TestDrive "AgentMeterBand-$version.dll"
-        & (Join-Path $PSScriptRoot '..\packaging\Build-Toolbar.ps1') -Version $version -OutputPath $toolbarDll
+        & (Join-Path $PSScriptRoot '..\build\Build-Toolbar.ps1') -Version $version -OutputPath $toolbarDll
         [void][Reflection.Assembly]::Load([IO.File]::ReadAllBytes($toolbarDll))
     }
 
@@ -24,18 +24,19 @@ Describe 'AgentMeterBand' {
 
     It 'requests a compact resizable height in horizontal mode' {
         $band = [AgentMeterBand]::new()
-        $horizontal = New-Object BandInfo
-        $horizontal.Mask = 41
+        $requestedFields = [DeskBandFields]::MinimumSize -bor [DeskBandFields]::PreferredSize -bor [DeskBandFields]::ModeFlags
+        $horizontal = New-Object DeskBandInfo
+        $horizontal.Fields = $requestedFields
         $band.GetBandInfo(0, 0, [ref]$horizontal) | Should Be 0
-        $horizontal.Min.Y | Should Be 14
-        $horizontal.Actual.Y | Should Be 26
+        $horizontal.MinimumSize.Y | Should Be 14
+        $horizontal.PreferredSize.Y | Should Be 26
         ($horizontal.ModeFlags -band 8) | Should Be 8
 
-        $vertical = New-Object BandInfo
-        $vertical.Mask = 41
+        $vertical = New-Object DeskBandInfo
+        $vertical.Fields = $requestedFields
         $band.GetBandInfo(0, 1, [ref]$vertical) | Should Be 0
-        $vertical.Min.X | Should Be 116
-        $vertical.Min.Y | Should Be 48
+        $vertical.MinimumSize.X | Should Be 116
+        $vertical.MinimumSize.Y | Should Be 48
         $vertical.ModeFlags | Should Be 0
     }
 
