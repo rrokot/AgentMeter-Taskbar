@@ -4,7 +4,11 @@ Windows taskbar toolbar for Claude and Codex usage limits. It shows the five-hou
 
 [Документация на русском](docs/README.ru.md)
 
-![The AgentMeter taskbar bars and quota popup in the dark Windows theme](docs/taskbar-preview.png)
+| Quotas on hover | Usage increase |
+| --- | --- |
+| ![The AgentMeter popup shows Claude and Codex usage, reset times, and the installed version](docs/taskbar-preview.png) | <img src="docs/taskbar-animation.gif" width="50" alt="Five-hour and weekly increases rise over the Claude quota bars"> |
+
+Captured from the running toolbar with sample usage.
 
 ## Install
 
