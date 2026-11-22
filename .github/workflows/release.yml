@@ -49,15 +49,13 @@ jobs:
         shell: powershell
         run: |
           $ErrorActionPreference = 'Stop'
-          . .\src\Updater\UpdateManifest.ps1
           $version = (Get-Content -LiteralPath VERSION -Raw).Trim()
-          $publicKey = Get-Content -LiteralPath .\src\Updater\update-public.xml -Raw
-          $manifest = Read-VerifiedUpdate (Get-Content -LiteralPath .\dist\agentmeter-update.json -Raw) $publicKey ([version]'0.0.0')
-          if (!$manifest -or $manifest.version -cne $version) { throw 'The signed update version does not match VERSION.' }
           $installerName = "AgentMeter-Taskbar-Setup-v$version.exe"
-          Assert-UpdateInstallerHash (Join-Path .\dist $installerName) $manifest.sha256
-          $checksumPath = Join-Path (Resolve-Path -LiteralPath .\dist).Path "AgentMeter-Taskbar-Setup-v$version.sha256"
-          [IO.File]::WriteAllText($checksumPath, "$($manifest.sha256)  $installerName" + [Environment]::NewLine, [Text.Encoding]::ASCII)
+          $dist = (Resolve-Path -LiteralPath .\dist).Path
+          $installer = Join-Path $dist $installerName
+          $hash = .\build\release\Test-ReleaseAssets.ps1 -Version $version -Installer $installer -Feed (Join-Path $dist 'agentmeter-update.json')
+          $checksumPath = Join-Path $dist "AgentMeter-Taskbar-Setup-v$version.sha256"
+          [IO.File]::WriteAllText($checksumPath, "$hash  $installerName" + [Environment]::NewLine, [Text.Encoding]::ASCII)
       - uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6.0.0
         with:
           name: signed-release

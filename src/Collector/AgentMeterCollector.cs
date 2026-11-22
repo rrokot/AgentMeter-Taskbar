@@ -1,28 +1,26 @@
 using System;
-using System.ComponentModel;
-using System.Diagnostics;
 using System.IO;
 
 internal static class AgentMeterCollector {
-    private static int Main() {
-        string installDirectory = AppDomain.CurrentDomain.BaseDirectory;
-        string collectorScript = Path.Combine(installDirectory, "RefreshQuota.ps1");
-        if (!File.Exists(collectorScript)) return 1;
-
-        var processInfo = new ProcessStartInfo {
-            FileName = Path.Combine(Environment.SystemDirectory, @"WindowsPowerShell\v1.0\powershell.exe"),
-            Arguments = "-NoProfile -NonInteractive -ExecutionPolicy Bypass -File \"" + collectorScript + "\"",
-            WorkingDirectory = installDirectory,
-            UseShellExecute = false,
-            CreateNoWindow = true
-        };
-
+    private static int Main(string[] args) {
         try {
-            using (var collector = Process.Start(processInfo)) {
-                collector.WaitForExit();
-                return collector.ExitCode;
+            if (args.Length == 1 && args[0] == "claude-status") {
+                ClaudeStatusLine.Publish(AppDomain.CurrentDomain.BaseDirectory, Console.In, Console.Out);
+                return 0;
             }
-        } catch (Win32Exception) {
+            if (args.Length != 0) return 1;
+            string codexHome = Environment.GetEnvironmentVariable("CODEX_HOME");
+            if (string.IsNullOrEmpty(codexHome)) {
+                codexHome = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), ".codex");
+            }
+            string claudeDesktopHistory = Path.Combine(
+                Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData),
+                @"Claude\plan-usage-history.json");
+            QuotaSnapshot.Collect(AppDomain.CurrentDomain.BaseDirectory, codexHome, claudeDesktopHistory);
+            return 0;
+        } catch (IOException) {
+            return 1;
+        } catch (UnauthorizedAccessException) {
             return 1;
         }
     }

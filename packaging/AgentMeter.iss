@@ -37,29 +37,21 @@ SolidCompression=yes
 
 [Files]
 Source: "{#BuildDirectory}\AgentMeterBand-{#AppVersion}.dll"; DestDir: "{app}"; Flags: ignoreversion onlyifdoesntexist uninsrestartdelete
-Source: "..\src\Collector\QuotaData.ps1"; DestDir: "{app}"; Flags: ignoreversion
-Source: "..\src\Collector\ClaudeStatusLine.ps1"; DestDir: "{app}"; Flags: ignoreversion
-Source: "..\src\Collector\RefreshQuota.ps1"; DestDir: "{app}"; Flags: ignoreversion
-Source: "{#BuildDirectory}\AgentMeterCollector-{#AppVersion}.exe"; DestDir: "{app}"; Flags: ignoreversion onlyifdoesntexist uninsrestartdelete
+Source: "{#BuildDirectory}\AgentMeter Collector-{#AppVersion}.exe"; DestDir: "{app}"; Flags: ignoreversion onlyifdoesntexist uninsrestartdelete
+Source: "{#BuildDirectory}\AgentMeterUpdater-{#AppVersion}.exe"; DestDir: "{app}"; Flags: ignoreversion onlyifdoesntexist uninsrestartdelete
 Source: "ManageInstallation.ps1"; DestDir: "{app}"; Flags: ignoreversion
 Source: "ClaudeConnection.ps1"; DestDir: "{app}"; Flags: ignoreversion
-Source: "..\src\Updater\UpdateAgentMeter.ps1"; DestDir: "{app}"; Flags: ignoreversion
-Source: "..\src\Updater\UpdateManifest.ps1"; DestDir: "{app}"; Flags: ignoreversion
-Source: "..\src\Updater\RestartExplorer.ps1"; DestDir: "{app}"; Flags: ignoreversion
 Source: "..\src\Updater\update-public.xml"; DestDir: "{app}"; Flags: ignoreversion
 Source: "..\LICENSE"; DestDir: "{app}"
 Source: "..\NOTICE-AgentMeter.txt"; DestDir: "{app}"
 
 [Icons]
-Name: "{group}\Check for updates"; Filename: "{sys}\WindowsPowerShell\v1.0\powershell.exe"; Parameters: "-NoProfile -NonInteractive -WindowStyle Hidden -ExecutionPolicy Bypass -File ""{app}\UpdateAgentMeter.ps1"" -Interactive"; WorkingDir: "{app}"; IconFilename: "{sys}\shell32.dll"; IconIndex: 239
 Name: "{group}\Setup guide"; Filename: "https://github.com/rrokot/AgentMeter-Taskbar#install"
 Name: "{group}\Uninstall AgentMeter Taskbar"; Filename: "{uninstallexe}"
 
 [UninstallDelete]
 Type: files; Name: "{app}\data.json"
 Type: files; Name: "{app}\claude-usage.json"
-Type: files; Name: "{app}\claude-cache.json"
-Type: files; Name: "{app}\RefreshQuota.vbs"
 Type: files; Name: "{app}\collector.lock"
 Type: files; Name: "{app}\claude-usage.lock"
 Type: files; Name: "{app}\updates.lock"
@@ -108,12 +100,9 @@ end;
 
 procedure RestartExplorerAfterSetup;
 var
-  Arguments: String;
   ExitCode: Integer;
 begin
-  Arguments := '-NoProfile -NonInteractive -ExecutionPolicy Bypass -File "' +
-    ExpandConstant('{app}\RestartExplorer.ps1') + '"';
-  if not Exec(ExpandConstant('{sys}\WindowsPowerShell\v1.0\powershell.exe'), Arguments,
+  if not Exec(ExpandConstant('{app}\AgentMeterUpdater-{#AppVersion}.exe'), 'restart-explorer-after-setup',
     ExpandConstant('{app}'), SW_HIDE, ewNoWait, ExitCode) then
   begin
     Log('Could not start the Explorer restart helper: ' + IntToStr(ExitCode));

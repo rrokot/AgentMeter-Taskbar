@@ -1,6 +1,12 @@
-function Set-AgentMeterClaudeConnection($SettingsPath, $StatusLinePath, [switch]$Remove) {
-    $statusLineCommand = 'powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File "' +
-        $StatusLinePath.Replace('\', '/') + '"'
+function Get-AgentMeterStatusLineCommand([ValidatePattern('^[0-9]+\.[0-9]+\.[0-9]+$')][string]$PublisherVersion) {
+    # Claude Code uses Git Bash or PowerShell on Windows. The space in the executable name
+    # keeps the path quoted when either shell forwards it to cmd for LOCALAPPDATA expansion.
+    $publisher = '"%LOCALAPPDATA%/AgentMeterTaskbar/AgentMeter Collector-' + $PublisherVersion + '.exe"'
+    'cmd.exe /d/v:off/c if exist ' + $publisher + ' ' + $publisher + ' claude-status'
+}
+
+function Set-AgentMeterClaudeConnection($SettingsPath, $PublisherVersion, [switch]$Remove, $PreviousPublisherVersion) {
+    $statusLineCommand = Get-AgentMeterStatusLineCommand $PublisherVersion
     $previousJson = $null
     $settings = [pscustomobject]@{}
     if (Test-Path -LiteralPath $SettingsPath) {
@@ -10,13 +16,16 @@ function Set-AgentMeterClaudeConnection($SettingsPath, $StatusLinePath, [switch]
     }
 
     $existing = $settings.PSObject.Properties['statusLine']
-    $isAgentMeter = $existing -and $existing.Value.type -eq 'command' -and
-        $existing.Value.command -ceq $statusLineCommand
+    $previousCommand = if ($PreviousPublisherVersion) { Get-AgentMeterStatusLineCommand $PreviousPublisherVersion }
+    $existingCommand = if ($existing -and $existing.Value.type -eq 'command') { $existing.Value.command }
     if ($Remove) {
-        if (!$isAgentMeter) { return $false }
+        if ($existingCommand -cne $statusLineCommand) { return $false }
         $settings.PSObject.Properties.Remove('statusLine')
+    } elseif ($existing) {
+        if ($existingCommand -ceq $statusLineCommand) { return $true }
+        if (!$previousCommand -or $existingCommand -cne $previousCommand) { return $false }
+        $existing.Value.command = $statusLineCommand
     } else {
-        if ($existing) { return [bool]$isAgentMeter }
         $settings | Add-Member -NotePropertyName statusLine -NotePropertyValue @{
             type = 'command'
             command = $statusLineCommand

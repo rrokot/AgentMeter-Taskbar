@@ -20,8 +20,8 @@ internal sealed class QuotaView : Control {
  private const int ClaudeFiveHourTrackIndex = 0;
  private const int CodexFiveHourTrackIndex = QuotaPeriodsPerProvider;
  private const int WeeklyTrackOffset = 1;
- private const string FiveHourSnapshotSlot = "c1";
- private const string WeeklySnapshotSlot = "c2";
+ private const string FiveHourSnapshotSlot = "five_hour";
+ private const string WeeklySnapshotSlot = "weekly";
  private const int IncreaseRiseMilliseconds = 2100;
  private const int IncreaseHoldMilliseconds = 300;
  private const int IncreaseDisplayMilliseconds = IncreaseRiseMilliseconds + IncreaseHoldMilliseconds;
@@ -59,13 +59,13 @@ internal sealed class QuotaView : Control {
  private bool lightTheme;
  private bool isVerticalTaskbar;
  private struct QuotaTrack {
-  internal readonly string ProviderKey, SnapshotKey, DefaultLabel;
+  internal readonly string ProviderKey, SnapshotKey, Label;
   internal readonly QuotaPopup.RowKind Period;
 
-  internal QuotaTrack(string providerKey, string snapshotSlot, string defaultLabel, QuotaPopup.RowKind period) {
+  internal QuotaTrack(string providerKey, string snapshotSlot, string label, QuotaPopup.RowKind period) {
    ProviderKey = providerKey;
    SnapshotKey = providerKey + "_" + snapshotSlot;
-   DefaultLabel = defaultLabel;
+   Label = label;
    Period = period;
   }
  }
@@ -239,9 +239,8 @@ internal sealed class QuotaView : Control {
      if (nextSnapshot != null) {
       string writtenAtText;
       DateTimeOffset writtenAt;
-      if (!nextSnapshot.TryGetValue("updated_at", out writtenAtText)) {
-       writtenAt = File.GetLastWriteTimeUtc(snapshotPath);
-      } else if (!DateTimeOffset.TryParseExact(writtenAtText, "o", CultureInfo.InvariantCulture,
+      if (!nextSnapshot.TryGetValue("updated_at", out writtenAtText) ||
+          !DateTimeOffset.TryParseExact(writtenAtText, "o", CultureInfo.InvariantCulture,
                  DateTimeStyles.None, out writtenAt)) {
        writtenAt = DateTimeOffset.MinValue;
       }
@@ -502,8 +501,7 @@ internal sealed class QuotaView : Control {
  private QuotaPopup.Row CreatePeriodRow(QuotaTrack track, DateTimeOffset now) {
   string quotaKey = track.SnapshotKey;
   QuotaPopup.RowKind kind = track.Period;
-  string label = SnapshotValue(quotaKey + "_label");
-  if (String.IsNullOrWhiteSpace(label)) label = track.DefaultLabel;
+  string label = track.Label;
   DateTimeOffset? resetAt = ReadResetTime(snapshot, quotaKey);
   int percent;
   bool hasCurrentUsage = HasFreshSnapshot(now) && !(resetAt <= now) &&

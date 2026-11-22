@@ -18,9 +18,11 @@ $productRegistryPath = 'HKCU:\Software\AgentMeterTaskbar'
 $toolbarRegistryPath = 'HKCU:\Software\Classes\CLSID\{EA143E8E-217B-4B86-925B-37EA04848915}'
 $serverRegistryPath = Join-Path $toolbarRegistryPath 'InprocServer32'
 $deskBandCategoryId = '{00021492-0000-0000-C000-000000000046}'
-$collectorLauncher = Join-Path $installDirectory "AgentMeterCollector-$ProductVersion.exe"
-$statusLine = Join-Path $installDirectory 'ClaudeStatusLine.ps1'
-$managedClaudeSettings = (Get-ItemProperty -LiteralPath $productRegistryPath -Name ClaudeSettingsPath -ErrorAction SilentlyContinue).ClaudeSettingsPath
+$collectorExe = Join-Path $installDirectory "AgentMeter Collector-$ProductVersion.exe"
+$updaterExe = Join-Path $installDirectory "AgentMeterUpdater-$ProductVersion.exe"
+$productRegistration = Get-ItemProperty -LiteralPath $productRegistryPath -ErrorAction SilentlyContinue
+$managedClaudeSettings = $productRegistration.ClaudeSettingsPath
+$managedClaudeVersion = $productRegistration.ClaudePublisherVersion
 . (Join-Path $installDirectory 'ClaudeConnection.ps1')
 
 function Remove-AgentMeterTask($TaskName) {
@@ -34,8 +36,8 @@ function Remove-AgentMeterTask($TaskName) {
 if ($Operation -eq 'Uninstall') {
     Remove-AgentMeterTask $updateTaskName
     Remove-AgentMeterTask $collectorTaskName
-    if ($managedClaudeSettings) {
-        try { [void](Set-AgentMeterClaudeConnection $managedClaudeSettings $statusLine -Remove) }
+    if ($managedClaudeSettings -and $managedClaudeVersion) {
+        try { [void](Set-AgentMeterClaudeConnection $managedClaudeSettings $managedClaudeVersion -Remove) }
         catch { Write-Warning 'Could not remove the AgentMeter status-line entry from Claude Code settings.' }
     }
     foreach ($registryPath in $toolbarRegistryPath, $productRegistryPath) {
@@ -52,14 +54,15 @@ $previousUpdater = Get-ScheduledTask -TaskName $updateTaskName -TaskPath $taskPa
 $principal = New-ScheduledTaskPrincipal -UserId $user.Name -LogonType Interactive -RunLevel Limited
 $collectorChanged = $false
 $previousCollectorXml = $null
-$updaterAdded = $false
+$updaterChanged = $false
+$previousUpdaterXml = $null
 
 try {
-    if (!$previousCollector -or $previousCollector.Actions.Execute -ne $collectorLauncher) {
+    if (!$previousCollector -or $previousCollector.Actions.Execute -ne $collectorExe) {
         if ($previousCollector) {
             $previousCollectorXml = Export-ScheduledTask -TaskName $collectorTaskName -TaskPath $taskPath
         }
-        $action = New-ScheduledTaskAction -Execute $collectorLauncher -WorkingDirectory $installDirectory
+        $action = New-ScheduledTaskAction -Execute $collectorExe -WorkingDirectory $installDirectory
         $interval = New-TimeSpan -Minutes 1
         $trigger = New-ScheduledTaskTrigger -Once -At (Get-Date).Add($interval) -RepetitionInterval $interval
         $settings = New-ScheduledTaskSettingsSet -MultipleInstances IgnoreNew -StartWhenAvailable -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries -ExecutionTimeLimit (New-TimeSpan -Seconds 55)
@@ -67,18 +70,18 @@ try {
         $collectorChanged = $true
     }
 
-    if (!$previousUpdater) {
-        $powershell = Join-Path $env:WINDIR 'System32\WindowsPowerShell\v1.0\powershell.exe'
-        $updater = Join-Path $installDirectory 'UpdateAgentMeter.ps1'
-        $arguments = '-NoProfile -NonInteractive -WindowStyle Hidden -ExecutionPolicy Bypass -File "' + $updater + '"'
-        $action = New-ScheduledTaskAction -Execute $powershell -Argument $arguments -WorkingDirectory $installDirectory
+    if (!$previousUpdater -or $previousUpdater.Actions.Execute -ne $updaterExe) {
+        if ($previousUpdater) {
+            $previousUpdaterXml = Export-ScheduledTask -TaskName $updateTaskName -TaskPath $taskPath
+        }
+        $action = New-ScheduledTaskAction -Execute $updaterExe -Argument 'automatic' -WorkingDirectory $installDirectory
         $triggers = @(
             New-ScheduledTaskTrigger -Daily -At '03:00'
             New-ScheduledTaskTrigger -AtLogOn -User $user.Name -RandomDelay (New-TimeSpan -Minutes 3)
         )
         $settings = New-ScheduledTaskSettingsSet -MultipleInstances IgnoreNew -StartWhenAvailable -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries -ExecutionTimeLimit (New-TimeSpan -Minutes 10)
-        Register-ScheduledTask -TaskName $updateTaskName -TaskPath $taskPath -Principal $principal -Action $action -Trigger $triggers -Settings $settings | Out-Null
-        $updaterAdded = $true
+        Register-ScheduledTask -TaskName $updateTaskName -TaskPath $taskPath -Principal $principal -Action $action -Trigger $triggers -Settings $settings -Force | Out-Null
+        $updaterChanged = $true
     }
 
     New-Item -Path $serverRegistryPath -Force | Out-Null
@@ -105,7 +108,11 @@ try {
     } elseif (!$previousServer -and (Test-Path -LiteralPath $toolbarRegistryPath)) {
         Remove-Item -LiteralPath $toolbarRegistryPath -Recurse -ErrorAction SilentlyContinue
     }
-    if ($updaterAdded) { Remove-AgentMeterTask $updateTaskName }
+    if ($updaterChanged) {
+        if ($previousUpdaterXml) {
+            Register-ScheduledTask -TaskName $updateTaskName -TaskPath $taskPath -Xml $previousUpdaterXml -Force | Out-Null
+        } else { Remove-AgentMeterTask $updateTaskName }
+    }
     if ($collectorChanged) {
         if ($previousCollectorXml) {
             Register-ScheduledTask -TaskName $collectorTaskName -TaskPath $taskPath -Xml $previousCollectorXml -Force | Out-Null
@@ -121,25 +128,20 @@ try {
     } elseif (Test-Path -LiteralPath $claudeDirectory -PathType Container) {
         $ExecutionContext.SessionState.Path.GetUnresolvedProviderPathFromPSPath((Join-Path $claudeDirectory 'settings.json'))
     }
-    if ($settingsPath -and (Set-AgentMeterClaudeConnection $settingsPath $statusLine)) {
+    if ($settingsPath -and (Set-AgentMeterClaudeConnection $settingsPath $ProductVersion -PreviousPublisherVersion $managedClaudeVersion)) {
         Set-ItemProperty -LiteralPath $productRegistryPath -Name ClaudeSettingsPath -Value $settingsPath
+        Set-ItemProperty -LiteralPath $productRegistryPath -Name ClaudePublisherVersion -Value $ProductVersion
+        $managedClaudeVersion = $ProductVersion
     }
 } catch { Write-Warning 'Could not configure the Claude Code status line.' }
 
-# A pre-release build used a shared task name. Migrate it only when it belongs to this user and installation.
-$legacyTaskName = 'AgentMeter Taskbar Collector'
-$legacyTask = Get-ScheduledTask -TaskName $legacyTaskName -TaskPath $taskPath -ErrorAction SilentlyContinue
-if ($legacyTask -and $legacyTask.Principal.UserId -in $user.Name, $user.User.Value -and
-    $legacyTask.Actions.WorkingDirectory -eq $installDirectory) {
-    try { Remove-AgentMeterTask $legacyTaskName }
-    catch { Write-Warning 'Could not remove the previous AgentMeter collector task.' }
-}
-Remove-Item -LiteralPath (Join-Path $installDirectory 'RefreshQuota.vbs') -ErrorAction SilentlyContinue
-Remove-Item -LiteralPath (Join-Path $installDirectory 'claude-cache.json') -ErrorAction SilentlyContinue
 Get-ChildItem -LiteralPath $installDirectory -Filter 'AgentMeterBand-*.dll' -File |
     Where-Object { $_.FullName -ne $toolbarDll } |
     Remove-Item -ErrorAction SilentlyContinue
-Get-ChildItem -LiteralPath $installDirectory -Filter 'AgentMeterCollector-*.exe' -File |
-    Where-Object { $_.FullName -ne $collectorLauncher } |
+Get-ChildItem -LiteralPath $installDirectory -Filter 'AgentMeter Collector-*.exe' -File |
+    Where-Object { $_.FullName -ne $collectorExe -and $_.Name -ne "AgentMeter Collector-$managedClaudeVersion.exe" } |
+    Remove-Item -ErrorAction SilentlyContinue
+Get-ChildItem -LiteralPath $installDirectory -Filter 'AgentMeterUpdater-*.exe' -File |
+    Where-Object { $_.FullName -ne $updaterExe } |
     Remove-Item -ErrorAction SilentlyContinue
 Start-ScheduledTask -TaskName $collectorTaskName -TaskPath $taskPath -ErrorAction SilentlyContinue

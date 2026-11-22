@@ -15,13 +15,13 @@
 
 ## Tests
 
-Run the tests in Windows PowerShell 5.1 with Pester 3.4. They compile the toolbar and use local quota fixtures.
+Run the tests in Windows PowerShell 5.1 with Pester 3.4. They compile the toolbar, collector, and updater and use local fixtures.
 
 ```powershell
 powershell.exe -NoProfile -Command "Invoke-Pester .\tests -EnableExit"
 ```
 
-Windows CI also tests installation, upgrades from a pinned public release, updates at sign-in, and uninstall.
+Windows CI also tests installation, signed updates, the sign-in update trigger, and uninstall using the current build.
 
 ## Releasing product changes
 

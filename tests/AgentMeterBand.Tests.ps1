@@ -100,10 +100,10 @@ Describe 'AgentMeterBand' {
             $writtenAt = $now.AddHours(-1)
             $snapshot = New-Object 'System.Collections.Generic.Dictionary[string,string]'
             $snapshot['claude_status'] = 'ok'
-            $snapshot['claude_c1_last_pct'] = '37'
-            $snapshot['claude_c1_observed_at'] = $writtenAt.ToString('o')
-            $snapshot['claude_c2_last_pct'] = '0'
-            $snapshot['claude_c2_observed_at'] = $writtenAt.ToString('o')
+            $snapshot['claude_five_hour_last_pct'] = '37'
+            $snapshot['claude_five_hour_observed_at'] = $writtenAt.ToString('o')
+            $snapshot['claude_weekly_last_pct'] = '0'
+            $snapshot['claude_weekly_observed_at'] = $writtenAt.ToString('o')
             $viewType.GetMethod('ApplySnapshot', $members).Invoke($view, @($snapshot.PSObject.BaseObject, $writtenAt, $now))
             $rows = $viewType.GetMethod('BuildPopupRows', $members).Invoke($view, @())
             $percent = $rows[1].GetType().GetField('Percent', $members)
@@ -120,16 +120,16 @@ Describe 'AgentMeterBand' {
         $now = [DateTimeOffset]::UtcNow
         $previous = New-Object 'System.Collections.Generic.Dictionary[string,string]'
         $previous['claude_status'] = 'ok'
-        $previous['claude_c1_pct'] = '23'
-        $previous['claude_c1_fresh_until'] = $now.AddSeconds(-1).ToString('o')
+        $previous['claude_five_hour_pct'] = '23'
+        $previous['claude_five_hour_fresh_until'] = $now.AddSeconds(-1).ToString('o')
         $current = New-Object 'System.Collections.Generic.Dictionary[string,string]'
         $current['claude_status'] = 'ok'
-        $current['claude_c1_pct'] = '41'
-        $current['claude_c1_fresh_until'] = $now.AddMinutes(15).ToString('o')
+        $current['claude_five_hour_pct'] = '41'
+        $current['claude_five_hour_fresh_until'] = $now.AddMinutes(15).ToString('o')
         $method = $viewType.GetMethod('GetUsageIncrease', $members)
         $arguments = @($previous.PSObject.BaseObject, $current.PSObject.BaseObject, 0, $now)
         $method.Invoke($null, $arguments) | Should Be 0
-        $previous['claude_c1_fresh_until'] = $now.AddMinutes(1).ToString('o')
+        $previous['claude_five_hour_fresh_until'] = $now.AddMinutes(1).ToString('o')
         $method.Invoke($null, $arguments) | Should Be 18
     }
 

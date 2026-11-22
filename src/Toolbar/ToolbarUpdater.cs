@@ -6,6 +6,7 @@ using System.IO;
 using System.Reflection;
 using System.Threading.Tasks;
 using System.Web.Script.Serialization;
+using Microsoft.Win32;
 
 internal static class ToolbarUpdater {
     internal enum Status { Failed, Busy, Current, Available, Installed }
@@ -27,9 +28,9 @@ internal static class ToolbarUpdater {
 
     internal static Task<Result> RequestAsync(string directory, Version targetVersion) {
         return Task.Run(() => {
-            string arguments = targetVersion == null ? "-Mode Check" : "-Mode Install -TargetVersion " + targetVersion;
+            string arguments = targetVersion == null ? "check" : "install " + targetVersion;
             int timeout = targetVersion == null ? CheckTimeoutMilliseconds : InstallTimeoutMilliseconds;
-            string output = RunScript(directory, "UpdateAgentMeter.ps1", arguments, timeout);
+            string output = RunUpdater(directory, arguments, timeout);
             if (output == null) return default(Result);
             try {
                 var reply = new JavaScriptSerializer().Deserialize<Dictionary<string, string>>(output);
@@ -51,17 +52,18 @@ internal static class ToolbarUpdater {
     }
 
     internal static Task<bool> RestartExplorerAsync(string directory) {
-        return Task.Run(() => RunScript(directory, "RestartExplorer.ps1", "-Quiet", RestartTimeoutMilliseconds) != null);
+        return Task.Run(() => RunUpdater(directory, "restart-explorer", RestartTimeoutMilliseconds) != null);
     }
 
-    private static string RunScript(string directory, string name, string arguments, int timeout) {
-        string script = Path.Combine(directory, name);
-        if (!File.Exists(script)) return null;
-        string powershell = Path.Combine(Environment.SystemDirectory, @"WindowsPowerShell\v1.0\powershell.exe");
+    private static string RunUpdater(string directory, string arguments, int timeout) {
         try {
+            var installedVersion = Registry.GetValue(@"HKEY_CURRENT_USER\Software\AgentMeterTaskbar", "Version", null) as string;
+            Version version;
+            if (!Version.TryParse(installedVersion, out version) || version.Build < 0 || version.Revision >= 0) return null;
+            string updater = Path.Combine(directory, "AgentMeterUpdater-" + version + ".exe");
             using (Process process = Process.Start(new ProcessStartInfo {
-                FileName = powershell,
-                Arguments = "-NoProfile -NonInteractive -ExecutionPolicy Bypass -File \"" + script + "\" " + arguments,
+                FileName = updater,
+                Arguments = arguments,
                 UseShellExecute = false,
                 CreateNoWindow = true,
                 RedirectStandardOutput = true
@@ -74,6 +76,8 @@ internal static class ToolbarUpdater {
         } catch (Win32Exception) { return null; }
         catch (IOException) { return null; }
         catch (InvalidOperationException) { return null; }
+        catch (UnauthorizedAccessException) { return null; }
+        catch (System.Security.SecurityException) { return null; }
     }
 
     private static Version ReadRunningVersion() {

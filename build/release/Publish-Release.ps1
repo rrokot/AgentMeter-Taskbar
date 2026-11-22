@@ -21,13 +21,8 @@ $installer = Join-Path $AssetDirectory $installerName
 $checksum = Join-Path $AssetDirectory "AgentMeter-Taskbar-Setup-$tag.sha256"
 $feed = Join-Path $AssetDirectory 'agentmeter-update.json'
 
-$updaterSources = Join-Path $projectRoot 'src\Updater'
-. (Join-Path $updaterSources 'UpdateManifest.ps1')
-$publicKey = Get-Content -LiteralPath (Join-Path $updaterSources 'update-public.xml') -Raw
-$manifest = Read-VerifiedUpdate (Get-Content -LiteralPath $feed -Raw) $publicKey ([version]'0.0.0')
-if (!$manifest -or $manifest.version -cne $version) { throw 'The update manifest does not match VERSION.' }
-Assert-UpdateInstallerHash $installer $manifest.sha256
-if ((Get-Content -LiteralPath $checksum -Raw).Trim() -cne "$($manifest.sha256)  $installerName") {
+$hash = & (Join-Path $PSScriptRoot 'Test-ReleaseAssets.ps1') -Version $version -Installer $installer -Feed $feed
+if ((Get-Content -LiteralPath $checksum -Raw).Trim() -cne "$hash  $installerName") {
     throw 'The checksum file does not match the signed installer.'
 }
 
