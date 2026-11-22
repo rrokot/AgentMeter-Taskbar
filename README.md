@@ -2,8 +2,6 @@
 
 Windows taskbar toolbar for Claude and Codex usage limits. It shows the five-hour and weekly windows for each service and reveals usage, available reset times, and the running toolbar version on hover.
 
-[Документация на русском](docs/README.ru.md)
-
 | Quotas on hover | Usage increase |
 | --- | --- |
 | ![The AgentMeter popup shows Claude and Codex usage, reset times, and the installed version](docs/taskbar-preview.png) | <img src="docs/taskbar-animation.gif" width="50" alt="Five-hour and weekly increases rise over the Claude quota bars"> |
@@ -18,48 +16,26 @@ Use Windows 11 x64 with the classic taskbar enabled in StartAllBack.
 2. Open Setup and follow the wizard. It installs for your Windows account. Windows may show **Unknown publisher** on first launch. Setup also upgrades installations from the original ZIP release.
 3. Right-click the taskbar and choose **Toolbars → AgentMeter Quotas**. If it is missing from the menu, sign out of Windows and sign back in.
 
-Codex quotas appear once a local Codex CLI session has recorded rate limits. The collector reads the latest matching entry in the session logs under `CODEX_HOME` or `%USERPROFILE%\.codex`.
+## Show your limits
 
-AgentMeter can read usage saved by the Windows Claude Desktop app. Open Claude Desktop and allow up to a minute for the panel to update. If Claude has yet to save a recent sample, open **Settings → Usage** in the app.
+- **Claude Code**. Select **Connect Claude Code** in Setup. Limits appear after Claude Code answers your first request. Setup preserves any custom status line. If you use one, Claude Desktop can supply your limits.
+- **Claude Desktop**. Open the app. If the percentages are still missing, open **Settings → Usage** in Claude Desktop.
+- **Codex**. Limits appear automatically once a local Codex session reports them.
 
-### Claude Code setup
+Allow up to one minute for the taskbar to refresh.
 
-Claude Code can send its five-hour and weekly usage to AgentMeter through its [status-line command](https://code.claude.com/docs/en/statusline#rate-limit-usage). The CLI supplies these fields for supported claude.ai plans after the first response in a session.
+## Read the bars
 
-Select **Connect Claude Code** in Setup to add the integration. Setup preserves any existing custom status line. The manual configuration below is useful when you want to combine the integration with an existing script.
+- **Horizontal taskbar**. Each service has two stacked bars with five-hour usage above weekly usage.
+- **Vertical taskbar**. From left to right, the bars are Claude 5h, Claude 7d, Codex 5h, and Codex 7d.
+- **Hover over the bars** to see percentages, reset times when available, and the installed version. If both limits for a service increase, the animation shows the weekly increase.
 
-Run this in Windows PowerShell to produce the settings entry for your installation:
-
-```powershell
-$scriptPath = (Join-Path $env:LOCALAPPDATA 'AgentMeterTaskbar\ClaudeStatusLine.ps1').Replace('\', '/')
-$command = 'powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File "' + $scriptPath + '"'
-@{ statusLine = @{ type = 'command'; command = $command } } | ConvertTo-Json -Depth 3
-```
-
-Add the `statusLine` entry to `%USERPROFILE%\.claude\settings.json` or the settings file in `CLAUDE_CONFIG_DIR`. Merge it with any other settings in the file. If you already have a status-line command, feed the same JSON to the AgentMeter script with `-Quiet` from your existing script to keep its output.
-
-Complete a turn in Claude Code and allow up to one minute for the taskbar to update. AgentMeter treats the latest percentage as current until its reset time, or for 15 minutes when the reset time is unknown.
-
-## How it works
-
-AgentMeter adapts to both taskbar orientations. On a horizontal taskbar, each service has two stacked progress tracks with the five-hour quota above the weekly quota. On a vertical taskbar, the bars are ordered Claude Code 5h, Claude Code 7d, Codex 5h, Codex 7d. A gray bar means that usage is unavailable. When both windows increase, the weekly increase takes priority in the animation.
-
-The collector runs once a minute under your Windows user account. It reads the Claude Code status line, Claude Desktop usage history, and Codex CLI session files on the same machine. Claude Desktop percentages count as current for 15 minutes. AgentMeter keeps the last known Claude percentage for each period across restarts. A dimmed fill and the **Last known** note in the popup identify an older value. The popup includes the observation time.
+An empty bar can mean 0% usage or missing data. The popup shows which applies. AgentMeter keeps the last known Claude percentages across restarts. A dimmed fill and a **Last known** note with the observation time mark an older value. A Claude reading with no reset time counts as current for 15 minutes.
 
 ## Update or uninstall
 
-Setup enables automatic updates by default. AgentMeter checks GitHub at sign-in and daily, verifies the release signature and installer checksum, and installs newer packages in the background. The toolbar loads the updated DLL the next time Explorer starts. Use **AgentMeter Taskbar → Check for updates** in Start to check on demand, or rerun Setup to change the automatic-update option.
+Automatic updates are on by default. AgentMeter checks at sign-in and once a day. To check now, open **Start → AgentMeter Taskbar → Check for updates**. Restart Windows Explorer to load the new version. Rerun Setup to change the automatic update setting.
 
-Remove **AgentMeter Taskbar** from **Settings → Apps → Installed apps**. Setup removes the Claude Code entry it configured. For integrations you added to your own script, remove the call from that script. An Explorer process that has already loaded the toolbar releases it when that process exits.
+To uninstall, open **Settings → Apps → Installed apps → AgentMeter Taskbar**. Setup removes the Claude Code entry it added. If the toolbar is still visible after uninstalling, restart Windows Explorer.
 
-## Development
-
-Run the tests from Windows PowerShell 5.1 with Pester 3.4. The tests compile the toolbar and use local quota fixtures.
-
-```powershell
-powershell.exe -NoProfile -Command "Invoke-Pester .\tests -EnableExit"
-```
-
-Windows CI builds the installer and tests setup, upgrade, update preferences, and uninstall. See [the release process](docs/RELEASING.md) for packaging and signing.
-
-AgentMeter Taskbar is distributed under the [MIT License](LICENSE). Parts of the project originated in [AgentMeter v0.2.0](https://github.com/fabianramirez-code/AgentMeter/tree/v0.2.0). Its MIT notice is included in [NOTICE-AgentMeter.txt](NOTICE-AgentMeter.txt).
+[MIT License](LICENSE)
