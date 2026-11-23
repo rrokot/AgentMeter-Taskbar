@@ -53,7 +53,7 @@ internal sealed class QuotaView : Control {
  private readonly JavaScriptSerializer jsonSerializer = new JavaScriptSerializer();
  private readonly IntPtr parentWindow;
  private readonly string snapshotPath = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
-  @"AgentMeterTaskbar\data.json");
+  InstallationLayout.DirectoryName, "data.json");
  private Dictionary<string, string> snapshot = new Dictionary<string, string>();
  private DateTimeOffset snapshotWrittenAt;
  private bool lightTheme;

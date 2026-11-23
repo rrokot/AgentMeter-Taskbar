@@ -16,7 +16,7 @@ AppPublisher=rrokot
 AppPublisherURL=https://github.com/rrokot/AgentMeter-Taskbar
 AppSupportURL=https://github.com/rrokot/AgentMeter-Taskbar/issues
 AppUpdatesURL=https://github.com/rrokot/AgentMeter-Taskbar/releases/latest
-DefaultDirName={localappdata}\AgentMeterTaskbar
+DefaultDirName={localappdata}\{#InstallDirectoryName}
 DefaultGroupName=AgentMeter Taskbar
 UninstallDisplayName=AgentMeter Taskbar
 PrivilegesRequired=lowest
@@ -36,9 +36,10 @@ Compression=lzma2
 SolidCompression=yes
 
 [Files]
-Source: "{#BuildDirectory}\AgentMeterBand-{#AppVersion}.dll"; DestDir: "{app}"; Flags: ignoreversion onlyifdoesntexist uninsrestartdelete
-Source: "{#BuildDirectory}\AgentMeter Collector-{#AppVersion}.exe"; DestDir: "{app}"; Flags: ignoreversion onlyifdoesntexist uninsrestartdelete
-Source: "{#BuildDirectory}\AgentMeterUpdater-{#AppVersion}.exe"; DestDir: "{app}"; Flags: ignoreversion onlyifdoesntexist uninsrestartdelete
+Source: "{#BuildDirectory}\{#ToolbarFileName}"; DestDir: "{app}"; Flags: ignoreversion onlyifdoesntexist uninsrestartdelete
+Source: "{#BuildDirectory}\{#CollectorFileName}"; DestDir: "{app}"; Flags: ignoreversion onlyifdoesntexist uninsrestartdelete
+Source: "{#BuildDirectory}\{#UpdaterFileName}"; DestDir: "{app}"; Flags: ignoreversion onlyifdoesntexist uninsrestartdelete
+Source: "InstallationLayout.psd1"; DestDir: "{app}"; Flags: ignoreversion
 Source: "ManageInstallation.ps1"; DestDir: "{app}"; Flags: ignoreversion
 Source: "ClaudeConnection.ps1"; DestDir: "{app}"; Flags: ignoreversion
 Source: "..\src\Updater\update-public.xml"; DestDir: "{app}"; Flags: ignoreversion
@@ -75,9 +76,9 @@ var
   InstalledVersionNumber, SetupVersionNumber: Int64;
 begin
   Result := '';
-  if CompareText(ExpandConstant('{app}'), ExpandConstant('{localappdata}\AgentMeterTaskbar')) <> 0 then
+  if CompareText(ExpandConstant('{app}'), ExpandConstant('{localappdata}\{#InstallDirectoryName}')) <> 0 then
     Result := 'Install AgentMeter Taskbar in its default local application directory.'
-  else if RegQueryStringValue(HKCU, 'Software\AgentMeterTaskbar', 'Version', InstalledVersion) and
+  else if RegQueryStringValue(HKCU, '{#ProductRegistrySubKey}', '{#RegistryVersionValueName}', InstalledVersion) and
     StrToVersion(InstalledVersion, InstalledVersionNumber) and
     StrToVersion('{#AppVersion}', SetupVersionNumber) and
     (ComparePackedVersion(InstalledVersionNumber, SetupVersionNumber) > 0) then
@@ -102,7 +103,7 @@ procedure RestartExplorerAfterSetup;
 var
   ExitCode: Integer;
 begin
-  if not Exec(ExpandConstant('{app}\AgentMeterUpdater-{#AppVersion}.exe'), 'restart-explorer-after-setup',
+  if not Exec(ExpandConstant('{app}\{#UpdaterFileName}'), 'restart-explorer-after-setup',
     ExpandConstant('{app}'), SW_HIDE, ewNoWait, ExitCode) then
   begin
     Log('Could not start the Explorer restart helper: ' + IntToStr(ExitCode));

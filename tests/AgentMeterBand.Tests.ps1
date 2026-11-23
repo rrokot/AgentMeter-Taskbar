@@ -1,7 +1,8 @@
 Describe 'AgentMeterBand' {
     BeforeAll {
         $version = (Get-Content -LiteralPath (Join-Path $PSScriptRoot '..\VERSION') -Raw).Trim()
-        $toolbarDll = Join-Path $TestDrive "AgentMeterBand-$version.dll"
+        $layout = Import-PowerShellDataFile -LiteralPath (Join-Path $PSScriptRoot '..\packaging\InstallationLayout.psd1')
+        $toolbarDll = Join-Path $TestDrive ($layout.ToolbarFileName -f $version)
         & (Join-Path $PSScriptRoot '..\build\Build-Toolbar.ps1') -Version $version -OutputPath $toolbarDll
         [void][Reflection.Assembly]::Load([IO.File]::ReadAllBytes($toolbarDll))
     }

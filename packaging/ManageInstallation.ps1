@@ -4,7 +4,8 @@ param(
 )
 
 $ErrorActionPreference = 'Stop'
-$installDirectory = Join-Path $env:LOCALAPPDATA 'AgentMeterTaskbar'
+$layout = Import-PowerShellDataFile -LiteralPath (Join-Path $PSScriptRoot 'InstallationLayout.psd1')
+$installDirectory = Join-Path $env:LOCALAPPDATA $layout.DirectoryName
 if ($PSScriptRoot -ne $installDirectory -or
     (Get-Item -LiteralPath $installDirectory -Force).Attributes.HasFlag([IO.FileAttributes]::ReparsePoint)) {
     throw 'Unexpected AgentMeter Taskbar installation directory.'
@@ -14,12 +15,13 @@ $user = [Security.Principal.WindowsIdentity]::GetCurrent()
 $collectorTaskName = "AgentMeter Taskbar Collector ($($user.User.Value))"
 $updateTaskName = "AgentMeter Taskbar Updates ($($user.User.Value))"
 $taskPath = '\'
-$productRegistryPath = 'HKCU:\Software\AgentMeterTaskbar'
+$productRegistryPath = Join-Path 'HKCU:\' $layout.RegistrySubKey
+$versionValueName = $layout.RegistryVersionValueName
 $toolbarRegistryPath = 'HKCU:\Software\Classes\CLSID\{EA143E8E-217B-4B86-925B-37EA04848915}'
 $serverRegistryPath = Join-Path $toolbarRegistryPath 'InprocServer32'
 $deskBandCategoryId = '{00021492-0000-0000-C000-000000000046}'
-$collectorExe = Join-Path $installDirectory "AgentMeter Collector-$ProductVersion.exe"
-$updaterExe = Join-Path $installDirectory "AgentMeterUpdater-$ProductVersion.exe"
+$collectorExe = Join-Path $installDirectory ($layout.CollectorFileName -f $ProductVersion)
+$updaterExe = Join-Path $installDirectory ($layout.UpdaterFileName -f $ProductVersion)
 $productRegistration = Get-ItemProperty -LiteralPath $productRegistryPath -ErrorAction SilentlyContinue
 $managedClaudeSettings = $productRegistration.ClaudeSettingsPath
 $managedClaudeVersion = $productRegistration.ClaudePublisherVersion
@@ -37,7 +39,7 @@ if ($Operation -eq 'Uninstall') {
     Remove-AgentMeterTask $updateTaskName
     Remove-AgentMeterTask $collectorTaskName
     if ($managedClaudeSettings -and $managedClaudeVersion) {
-        try { [void](Set-AgentMeterClaudeConnection $managedClaudeSettings $managedClaudeVersion -Remove) }
+        try { [void](Set-AgentMeterClaudeConnection $managedClaudeSettings $managedClaudeVersion -Layout $layout -Remove) }
         catch { Write-Warning 'Could not remove the AgentMeter status-line entry from Claude Code settings.' }
     }
     foreach ($registryPath in $toolbarRegistryPath, $productRegistryPath) {
@@ -46,7 +48,7 @@ if ($Operation -eq 'Uninstall') {
     return
 }
 
-$toolbarDll = Join-Path $installDirectory "AgentMeterBand-$ProductVersion.dll"
+$toolbarDll = Join-Path $installDirectory ($layout.ToolbarFileName -f $ProductVersion)
 $assemblyName = [Reflection.AssemblyName]::GetAssemblyName($toolbarDll).FullName
 $previousServer = Get-ItemProperty -LiteralPath $serverRegistryPath -ErrorAction SilentlyContinue
 $previousCollector = Get-ScheduledTask -TaskName $collectorTaskName -TaskPath $taskPath -ErrorAction SilentlyContinue
@@ -100,7 +102,7 @@ try {
     New-Item -Path "$toolbarRegistryPath\Implemented Categories\$deskBandCategoryId" -Force | Out-Null
 
     New-Item -Path $productRegistryPath -Force | Out-Null
-    Set-ItemProperty -LiteralPath $productRegistryPath -Name Version -Value $ProductVersion
+    Set-ItemProperty -LiteralPath $productRegistryPath -Name $versionValueName -Value $ProductVersion
 } catch {
     if ($previousServer.Assembly -and $previousServer.CodeBase) {
         Set-ItemProperty -LiteralPath $serverRegistryPath -Name Assembly -Value $previousServer.Assembly -ErrorAction SilentlyContinue
@@ -128,20 +130,38 @@ try {
     } elseif (Test-Path -LiteralPath $claudeDirectory -PathType Container) {
         $ExecutionContext.SessionState.Path.GetUnresolvedProviderPathFromPSPath((Join-Path $claudeDirectory 'settings.json'))
     }
-    if ($settingsPath -and (Set-AgentMeterClaudeConnection $settingsPath $ProductVersion -PreviousPublisherVersion $managedClaudeVersion)) {
+    if ($settingsPath -and (Set-AgentMeterClaudeConnection $settingsPath $ProductVersion -Layout $layout -PreviousPublisherVersion $managedClaudeVersion)) {
         Set-ItemProperty -LiteralPath $productRegistryPath -Name ClaudeSettingsPath -Value $settingsPath
         Set-ItemProperty -LiteralPath $productRegistryPath -Name ClaudePublisherVersion -Value $ProductVersion
         $managedClaudeVersion = $ProductVersion
     }
 } catch { Write-Warning 'Could not configure the Claude Code status line.' }
 
-Get-ChildItem -LiteralPath $installDirectory -Filter 'AgentMeterBand-*.dll' -File |
+Get-ChildItem -LiteralPath $installDirectory -Filter ($layout.ToolbarFileName -f '*') -File |
     Where-Object { $_.FullName -ne $toolbarDll } |
     Remove-Item -ErrorAction SilentlyContinue
-Get-ChildItem -LiteralPath $installDirectory -Filter 'AgentMeter Collector-*.exe' -File |
-    Where-Object { $_.FullName -ne $collectorExe -and $_.Name -ne "AgentMeter Collector-$managedClaudeVersion.exe" } |
+Get-ChildItem -LiteralPath $installDirectory -Filter ($layout.CollectorFileName -f '*') -File |
+    Where-Object { $_.FullName -ne $collectorExe -and $_.Name -ne ($layout.CollectorFileName -f $managedClaudeVersion) } |
     Remove-Item -ErrorAction SilentlyContinue
-Get-ChildItem -LiteralPath $installDirectory -Filter 'AgentMeterUpdater-*.exe' -File |
+Get-ChildItem -LiteralPath $installDirectory -Filter ($layout.UpdaterFileName -f '*') -File |
     Where-Object { $_.FullName -ne $updaterExe } |
     Remove-Item -ErrorAction SilentlyContinue
-Start-ScheduledTask -TaskName $collectorTaskName -TaskPath $taskPath -ErrorAction SilentlyContinue
+
+if ($productRegistration.$versionValueName) {
+    Start-ScheduledTask -TaskName $collectorTaskName -TaskPath $taskPath -ErrorAction SilentlyContinue
+    return
+}
+
+# Give Explorer a quota snapshot when it loads the toolbar after first-time setup.
+try {
+    $initialCollector = Start-Process -FilePath $collectorExe -WindowStyle Hidden -PassThru
+    try {
+        $initialCollectionTimeoutMilliseconds = 10000
+        if (!$initialCollector.WaitForExit($initialCollectionTimeoutMilliseconds)) {
+            if (!$initialCollector.HasExited) { $initialCollector.Kill() }
+            Write-Warning 'Initial quota collection timed out. The scheduled collector will try again.'
+        } elseif ($initialCollector.ExitCode -ne 0) {
+            Write-Warning "Initial quota collection returned exit code $($initialCollector.ExitCode)."
+        }
+    } finally { $initialCollector.Dispose() }
+} catch { Write-Warning 'Could not start the initial quota collection. The scheduled collector will try again.' }

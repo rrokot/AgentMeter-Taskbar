@@ -4,6 +4,7 @@
 
 - `src/Toolbar/`, `src/Collector/`, and `src/Updater/` contain the toolbar, quota collector, and installed updater.
 - `packaging/` contains the Inno Setup definition and its install and uninstall hooks. The definition maps runtime files from `src/` into the per-user installation directory.
+- `packaging/InstallationLayout.psd1` defines the installed binary names, directory, and version registry location. Build scripts pass these values to Inno Setup and generate the constants used by the toolbar and updater.
 - `build/` contains build entry points. `build/release/` handles update signing and GitHub publication.
 - `tests/` contains Pester tests and the Windows CI installation test.
 

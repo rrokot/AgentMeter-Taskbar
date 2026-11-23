@@ -6,7 +6,6 @@ using System.IO;
 using System.Reflection;
 using System.Threading.Tasks;
 using System.Web.Script.Serialization;
-using Microsoft.Win32;
 
 internal static class ToolbarUpdater {
     internal enum Status { Failed, Busy, Current, Available, Installed }
@@ -57,10 +56,8 @@ internal static class ToolbarUpdater {
 
     private static string RunUpdater(string directory, string arguments, int timeout) {
         try {
-            var installedVersion = Registry.GetValue(@"HKEY_CURRENT_USER\Software\AgentMeterTaskbar", "Version", null) as string;
-            Version version;
-            if (!Version.TryParse(installedVersion, out version) || version.Build < 0 || version.Revision >= 0) return null;
-            string updater = Path.Combine(directory, "AgentMeterUpdater-" + version + ".exe");
+            var version = InstallationLayout.ReadInstalledVersion();
+            string updater = Path.Combine(directory, InstallationLayout.UpdaterFileNameFor(version));
             using (Process process = Process.Start(new ProcessStartInfo {
                 FileName = updater,
                 Arguments = arguments,

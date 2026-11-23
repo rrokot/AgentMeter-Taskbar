@@ -3,10 +3,8 @@ using System.Diagnostics;
 using System.Globalization;
 using System.IO;
 using System.Net;
-using Microsoft.Win32;
 
 internal static class UpdateService {
-    private const string RegistryPath = @"Software\AgentMeterTaskbar";
     private const string ReleaseBase = "https://github.com/rrokot/AgentMeter-Taskbar/releases";
     private const string ManifestFile = "agentmeter-update.json";
     private const string PublicKeyFile = "update-public.xml";
@@ -32,7 +30,7 @@ internal static class UpdateService {
             string manifestPath = Path.Combine(temporaryDirectory, ManifestFile);
             string installerPath = Path.Combine(temporaryDirectory, "AgentMeter-Setup.exe");
             try {
-                var installedVersion = ReadInstalledVersion();
+                var installedVersion = InstallationLayout.ReadInstalledVersion();
                 Directory.CreateDirectory(temporaryDirectory);
                 download(new Uri(ReleaseBase + "/latest/download/" + ManifestFile), manifestPath, 30);
                 var release = UpdateManifest.Read(manifestPath, Path.Combine(directory, PublicKeyFile));
@@ -46,11 +44,11 @@ internal static class UpdateService {
                     "/AgentMeter-Taskbar-Setup-" + releaseName + ".exe");
                 download(installerUri, installerPath, 90);
                 release.VerifyInstaller(installerPath);
-                installedVersion = ReadInstalledVersion();
+                installedVersion = InstallationLayout.ReadInstalledVersion();
                 if (release.Version <= installedVersion) return new Result(Status.Current, installedVersion);
 
                 Install(installerPath);
-                if (ReadInstalledVersion() != release.Version) {
+                if (InstallationLayout.ReadInstalledVersion() != release.Version) {
                     throw new InvalidOperationException("Setup did not register the expected version.");
                 }
                 WriteLog(directory, "Installed " + release.Version);
@@ -94,15 +92,6 @@ internal static class UpdateService {
                 " " + message + Environment.NewLine);
         } catch (IOException) { }
         catch (UnauthorizedAccessException) { }
-    }
-
-    private static Version ReadInstalledVersion() {
-        Version version;
-        var text = Registry.GetValue(@"HKEY_CURRENT_USER\" + RegistryPath, "Version", null) as string;
-        if (!UpdateManifest.TryParseVersion(text, out version)) {
-            throw new InvalidOperationException("AgentMeter is not installed for this user.");
-        }
-        return version;
     }
 
     private static void Install(string executable) {

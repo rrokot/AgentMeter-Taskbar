@@ -8,9 +8,11 @@ if ($env:GITHUB_ACTIONS -ne 'true' -or $env:RUNNER_ENVIRONMENT -ne 'github-hoste
     throw 'Run this installation test on a disposable GitHub-hosted runner.'
 }
 
-$installDirectory = Join-Path $env:LOCALAPPDATA 'AgentMeterTaskbar'
+$layout = Import-PowerShellDataFile -LiteralPath (Join-Path $PSScriptRoot '..\..\packaging\InstallationLayout.psd1')
+$installDirectory = Join-Path $env:LOCALAPPDATA $layout.DirectoryName
 $startAllBack = 'HKCU:\Software\StartIsBack'
-$productKey = 'HKCU:\Software\AgentMeterTaskbar'
+$productKey = Join-Path 'HKCU:\' $layout.RegistrySubKey
+$versionValueName = $layout.RegistryVersionValueName
 $toolbarKey = 'HKCU:\Software\Classes\CLSID\{EA143E8E-217B-4B86-925B-37EA04848915}'
 $uninstallKey = 'HKCU:\Software\Microsoft\Windows\CurrentVersion\Uninstall\{B8D2F322-40F2-4265-8551-1E9417B52FDD}_is1'
 $sid = [Security.Principal.WindowsIdentity]::GetCurrent().User.Value
@@ -26,10 +28,10 @@ function Start-TestSetup($Path, [string[]]$Options) {
 }
 
 function Assert-InstalledVersion($ExpectedVersion) {
-    $actualVersion = (Get-ItemProperty -LiteralPath $productKey -Name Version).Version
+    $actualVersion = Get-ItemPropertyValue -LiteralPath $productKey -Name $versionValueName
     if ($actualVersion -ne $ExpectedVersion) { throw "Expected version $ExpectedVersion, installed $actualVersion." }
     $server = Get-ItemProperty -LiteralPath (Join-Path $toolbarKey 'InprocServer32')
-    $expectedDll = Join-Path $installDirectory "AgentMeterBand-$ExpectedVersion.dll"
+    $expectedDll = Join-Path $installDirectory ($layout.ToolbarFileName -f $ExpectedVersion)
     if (([uri]$server.CodeBase).LocalPath -ne $expectedDll -or !(Test-Path -LiteralPath $expectedDll -PathType Leaf)) {
         throw 'Explorer registration does not reference the packaged toolbar.'
     }
@@ -68,7 +70,7 @@ function Invoke-TestSignedUpdate([switch]$CheckOnly) {
         }
     }
     try {
-        $registryVersion = (Get-ItemProperty -LiteralPath $productKey -Name Version).Version
+        $registryVersion = Get-ItemPropertyValue -LiteralPath $productKey -Name $versionValueName
         $updateDirectory = $installDirectory.PSObject.BaseObject
         if ($CheckOnly) {
             $check = $runUpdate.Invoke($null, @($updateDirectory, [Enum]::Parse($updateMode, 'Check'), $null, $download))
@@ -108,8 +110,28 @@ try {
     [IO.Directory]::CreateDirectory($env:CLAUDE_CONFIG_DIR) | Out-Null
     $claudeSettings = Join-Path $env:CLAUDE_CONFIG_DIR 'settings.json'
     [IO.File]::WriteAllText($claudeSettings, '{"permissions":{"allow":["Read"]}}')
+
+    $env:CODEX_HOME = Join-Path $logDirectory 'codex'
+    $codexSessions = Join-Path $env:CODEX_HOME 'sessions'
+    [IO.Directory]::CreateDirectory($codexSessions) | Out-Null
+    $codexLog = @{
+        timestamp = [DateTimeOffset]::UtcNow.ToString('o')
+        payload = @{
+            type = 'token_count'
+            rate_limits = @{ primary = @{ used_percent = 21; window_minutes = 300 } }
+        }
+    } | ConvertTo-Json -Compress -Depth 6
+    [IO.File]::WriteAllText((Join-Path $codexSessions 'rollout-first-install.jsonl'), $codexLog)
     if ((Start-TestSetup $Installer ($options + "/LOG=$logDirectory\install.log")) -ne 0) {
         throw 'Fresh setup failed.'
+    }
+    $snapshotPath = Join-Path $installDirectory 'data.json'
+    if (!(Test-Path -LiteralPath $snapshotPath -PathType Leaf)) {
+        throw 'The first installation completed without a quota snapshot.'
+    }
+    $snapshot = Get-Content -LiteralPath $snapshotPath -Raw | ConvertFrom-Json
+    if ($snapshot.codex_five_hour_pct -ne '21' -or !$snapshot.PSObject.Properties['claude_five_hour_pct']) {
+        throw 'The first quota snapshot did not include the existing Codex quota and the Claude fields.'
     }
     Assert-InstalledVersion $Version
     $initialUninstall = (Get-ItemProperty -LiteralPath $uninstallKey).UninstallString
@@ -120,37 +142,32 @@ try {
     if (!($updaterTriggers | Where-Object { $_.CimClass.CimClassName -eq 'MSFT_TaskLogonTrigger' -and $_.Enabled })) {
         throw 'Automatic updates must check at Windows sign-in.'
     }
-    $updaterExe = Join-Path $installDirectory "AgentMeterUpdater-$Version.exe"
+    $updaterExe = Join-Path $installDirectory ($layout.UpdaterFileName -f $Version)
     $updaterAction = (Get-ScheduledTask -TaskName $updateTask).Actions
     if ($updaterAction.Execute -ne $updaterExe -or $updaterAction.Arguments -ne 'automatic') {
         throw 'The scheduled task does not run the packaged updater executable.'
     }
+    $toolbarDll = Join-Path $installDirectory ($layout.ToolbarFileName -f $Version)
+    $toolbar = [Reflection.Assembly]::Load([IO.File]::ReadAllBytes($toolbarDll))
+    $runToolbarUpdater = $toolbar.GetType('ToolbarUpdater', $true).GetMethod('RunUpdater', [Reflection.BindingFlags]'Static, NonPublic')
+    # Hold the lock so the toolbar can launch the registered updater without downloading a release.
+    $updateLock = [IO.File]::Open((Join-Path $installDirectory 'updates.lock'), 'OpenOrCreate', 'Write', 'None')
+    try {
+        $reply = $runToolbarUpdater.Invoke($null, @($installDirectory.PSObject.BaseObject, 'check', 30000)) | ConvertFrom-Json
+        if ($reply.status -ne 'busy') { throw 'The toolbar could not launch the installed updater.' }
+    } finally { $updateLock.Dispose() }
     $updaterAssembly = [Reflection.Assembly]::Load([IO.File]::ReadAllBytes($updaterExe))
     $updateService = $updaterAssembly.GetType('UpdateService', $true)
     $updateMode = $updateService.GetNestedType('Mode', [Reflection.BindingFlags]'NonPublic')
     $runUpdate = $updateService.GetMethod('Run', [Reflection.BindingFlags]'Static, NonPublic')
-    $collectorExe = Join-Path $installDirectory "AgentMeter Collector-$Version.exe"
+    $collectorExe = Join-Path $installDirectory ($layout.CollectorFileName -f $Version)
     $collectorAction = (Get-ScheduledTask -TaskName $collectorTask).Actions
     if ($collectorAction.Execute -ne $collectorExe) {
         throw 'The scheduled task does not run the packaged collector executable.'
     }
-    $collectorRun = Start-Process -FilePath $collectorExe -WindowStyle Hidden -Wait -PassThru
-    $snapshotPath = Join-Path $installDirectory 'data.json'
-    if ($collectorRun.ExitCode -ne 0) { throw "The collector exited with code $($collectorRun.ExitCode)." }
-    $snapshotDeadline = [DateTime]::UtcNow.AddSeconds(10)
-    while (!(Test-Path -LiteralPath $snapshotPath) -and [DateTime]::UtcNow -lt $snapshotDeadline) {
-        Start-Sleep -Milliseconds 100
-    }
-    if (!(Test-Path -LiteralPath $snapshotPath)) {
-        throw 'The packaged collector could not publish a quota snapshot.'
-    }
-    $snapshot = Get-Content -LiteralPath $snapshotPath -Raw | ConvertFrom-Json
-    if (!$snapshot.PSObject.Properties['claude_five_hour_pct'] -or !$snapshot.PSObject.Properties['codex_weekly_pct']) {
-        throw 'The packaged collector did not publish the quota fields used by the toolbar.'
-    }
 
     # Exercise an available signed update with the current package and an older registered version.
-    Set-ItemProperty -LiteralPath $productKey -Name Version -Value '0.0.0'
+    Set-ItemProperty -LiteralPath $productKey -Name $versionValueName -Value '0.0.0'
     Invoke-TestSignedUpdate
     Assert-InstalledVersion $Version
     Invoke-TestSignedUpdate
@@ -158,12 +175,12 @@ try {
     if ((Get-ItemProperty -LiteralPath $uninstallKey).UninstallString -ne $initialUninstall) {
         throw 'Upgrade should reuse the Installed apps entry.'
     }
-    Set-ItemProperty -LiteralPath $productKey -Name Version -Value $newerVersion
+    Set-ItemProperty -LiteralPath $productKey -Name $versionValueName -Value $newerVersion
     try {
         if ((Start-TestSetup $Installer ($options + "/LOG=$logDirectory\downgrade.log")) -eq 0) {
             throw 'Setup allowed an older version over a newer one.'
         }
-    } finally { Set-ItemProperty -LiteralPath $productKey -Name Version -Value $Version }
+    } finally { Set-ItemProperty -LiteralPath $productKey -Name $versionValueName -Value $Version }
     Assert-InstalledVersion $Version
 
     if ((Start-TestSetup $Installer ($options + "/LOG=$logDirectory\reinstall.log")) -ne 0) {

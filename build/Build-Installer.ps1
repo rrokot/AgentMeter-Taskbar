@@ -6,17 +6,30 @@ param(
 
 $ErrorActionPreference = 'Stop'
 $projectRoot = Split-Path -Parent $PSScriptRoot
+$packagingDirectory = Join-Path $projectRoot 'packaging'
+$layout = Import-PowerShellDataFile -LiteralPath (Join-Path $packagingDirectory 'InstallationLayout.psd1')
 $OutputDirectory = $ExecutionContext.SessionState.Path.GetUnresolvedProviderPathFromPSPath($OutputDirectory)
 $buildDirectory = Join-Path $OutputDirectory "build-$Version"
 [IO.Directory]::CreateDirectory($buildDirectory) | Out-Null
-$toolbarDll = Join-Path $buildDirectory "AgentMeterBand-$Version.dll"
-& (Join-Path $PSScriptRoot 'Build-Toolbar.ps1') -Version $Version -OutputPath $toolbarDll
+$toolbarFileName = $layout.ToolbarFileName -f $Version
+$collectorFileName = $layout.CollectorFileName -f $Version
+$updaterFileName = $layout.UpdaterFileName -f $Version
+& (Join-Path $PSScriptRoot 'Build-Toolbar.ps1') -Version $Version -OutputPath (Join-Path $buildDirectory $toolbarFileName)
+& (Join-Path $PSScriptRoot 'Build-Collector.ps1') -OutputPath (Join-Path $buildDirectory $collectorFileName)
+& (Join-Path $PSScriptRoot 'Build-Updater.ps1') -OutputPath (Join-Path $buildDirectory $updaterFileName)
 
-$collectorExe = Join-Path $buildDirectory "AgentMeter Collector-$Version.exe"
-& (Join-Path $PSScriptRoot 'Build-Collector.ps1') -OutputPath $collectorExe
-$updaterExe = Join-Path $buildDirectory "AgentMeterUpdater-$Version.exe"
-& (Join-Path $PSScriptRoot 'Build-Updater.ps1') -OutputPath $updaterExe
-
-$installerSource = Join-Path $projectRoot 'packaging\AgentMeter.iss'
-& $InnoCompiler "/DAppVersion=$Version" "/DBuildDirectory=$buildDirectory" "/DOutputDirectory=$OutputDirectory" $installerSource
+$installerSource = Join-Path $packagingDirectory 'AgentMeter.iss'
+$compilerArguments = @(
+    "/DAppVersion=$Version"
+    "/DBuildDirectory=$buildDirectory"
+    "/DOutputDirectory=$OutputDirectory"
+    "/DInstallDirectoryName=$($layout.DirectoryName)"
+    "/DProductRegistrySubKey=$($layout.RegistrySubKey)"
+    "/DRegistryVersionValueName=$($layout.RegistryVersionValueName)"
+    "/DToolbarFileName=$toolbarFileName"
+    "/DCollectorFileName=$collectorFileName"
+    "/DUpdaterFileName=$updaterFileName"
+    $installerSource
+)
+& $InnoCompiler @compilerArguments
 if ($LASTEXITCODE -ne 0) { throw 'Could not build AgentMeter Setup.' }
