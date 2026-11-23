@@ -171,13 +171,17 @@ Describe 'Quota collector snapshots' {
         $output.claude_weekly_pct | Should Be '37'
     }
 
-    It 'keeps the original age of a Claude Code period when a newer payload updates the other one' {
+    It 'accepts a UTF-8 preamble and preserves the untouched Claude Code period' {
         $fixture = New-QuotaFixture
         $previousTime = [DateTimeOffset]::UtcNow.AddMinutes(-20)
         Write-FixtureJson $fixture.statusLine @{
             five_hour = @{ percent = 14; observed_at = $previousTime.ToString('o') }
         }
-        Invoke-FixtureStatusLine '{"rate_limits":{"seven_day":{"used_percentage":37}}}' $fixture.directory | Should Be '7d: 37%'
+        $originalInputEncoding = [Console]::InputEncoding
+        try {
+            [Console]::InputEncoding = [Text.UTF8Encoding]::new($true)
+            Invoke-FixtureStatusLine '{"rate_limits":{"seven_day":{"used_percentage":37}}}' $fixture.directory | Should Be '7d: 37%'
+        } finally { [Console]::InputEncoding = $originalInputEncoding }
         $output = Invoke-FixtureCollection $fixture
         $output.claude_five_hour_pct | Should Be ''
         $output.claude_five_hour_last_pct | Should Be '14'

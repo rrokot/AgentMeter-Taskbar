@@ -1,11 +1,16 @@
 using System;
 using System.IO;
+using System.Text;
 
 internal static class AgentMeterCollector {
     private static int Main(string[] args) {
         try {
             if (args.Length == 1 && args[0] == "claude-status") {
-                ClaudeStatusLine.Publish(AppDomain.CurrentDomain.BaseDirectory, Console.In, Console.Out);
+                var utf8 = new UTF8Encoding(false);
+                using (var input = new StreamReader(Console.OpenStandardInput(), utf8, true))
+                using (var output = new StreamWriter(Console.OpenStandardOutput(), utf8)) {
+                    ClaudeStatusLine.Publish(AppDomain.CurrentDomain.BaseDirectory, input, output);
+                }
                 return 0;
             }
             if (args.Length != 0) return 1;
