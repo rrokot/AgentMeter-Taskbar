@@ -1,6 +1,10 @@
 # AgentMeter Taskbar
 
-Windows taskbar toolbar for Claude and Codex usage limits. It shows the five-hour and weekly windows for each service and reveals usage, available reset times, and the running toolbar version on hover.
+AgentMeter Taskbar shows 5-hour and weekly usage limits for Claude Code, Claude Desktop, and Codex on the Windows 11 taskbar. Hover over the bars to see usage percentages, reset times when available, and the installed version.
+
+Requires Windows 11 x64 and StartAllBack with the classic taskbar enabled.
+
+**[Download for Windows 11][latest-release]**
 
 | Quotas on hover | Usage increase |
 | --- | --- |
@@ -10,9 +14,7 @@ Captured from the running toolbar with sample usage.
 
 ## Install
 
-Use Windows 11 x64 with the classic taskbar enabled in StartAllBack.
-
-1. Download `AgentMeter-Taskbar-Setup-v*.exe` from [GitHub Releases](https://github.com/rrokot/AgentMeter-Taskbar/releases/latest).
+1. Download `AgentMeter-Taskbar-Setup-v*.exe` from the [latest release][latest-release].
 2. Open Setup and click **Install**. It installs for your Windows account. Windows may show **Unknown publisher** on first launch. When you finish Setup, Windows Explorer restarts to load AgentMeter.
 3. Right-click the taskbar and choose **Toolbars → AgentMeter Quotas**. If it is missing from the menu, sign out of Windows and sign back in.
 
@@ -39,3 +41,5 @@ AgentMeter checks for updates at sign-in and once a day. Select **Check for upda
 To uninstall, open **Settings → Apps → Installed apps → AgentMeter Taskbar**. Setup removes the Claude Code entry it added. If the toolbar is still visible after uninstalling, restart Windows Explorer.
 
 [MIT License](LICENSE)
+
+[latest-release]: https://github.com/rrokot/AgentMeter-Taskbar/releases/latest

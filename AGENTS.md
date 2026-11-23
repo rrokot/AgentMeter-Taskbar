@@ -30,7 +30,7 @@ When the user asks to push completed changes to the toolbar, collector, or insta
 
 1. Bump `VERSION`, commit the changes, and push the release commit to `main`.
 2. Run **Windows release** on `main` in GitHub Actions with **Publish the signed installer as the latest release** selected. This builds and tests Setup, signs and verifies the update manifest, and publishes the installer, checksum, and manifest under the matching `v` tag.
-3. Confirm the workflow succeeded and the expected release is live. Leave the publish option clear to test the cloud build and signing without changing the public release.
+3. Confirm the workflow succeeded and the expected release is live. Add a short summary of user-visible changes above the generated changelog. Leave the publish option clear to test the cloud build and signing without changing the public release.
 
 The signing key is the `AGENTMETER_UPDATE_SIGNING_KEY` secret in the `release-signing` GitHub Actions environment. The job receives it only for signing. The verification key is in `src/Updater/update-public.xml`.
 
