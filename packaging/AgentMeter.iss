@@ -87,9 +87,11 @@ begin
   if Taskbar = 0 then
     Exit;
 
-  { Classic Explorer taskbars host toolbars in a rebar under the main taskbar window. }
+  { Explorer's classic rebar contains the Win32 task switcher and hosts DeskBand toolbars. }
   BandContainer := FindChildWindow(Taskbar, 0, 'ReBarWindow32', 0);
   if BandContainer = 0 then
+    Exit;
+  if FindChildWindow(BandContainer, 0, 'MSTaskSwWClass', 0) = 0 then
     Exit;
 
   BandCount := 0;
