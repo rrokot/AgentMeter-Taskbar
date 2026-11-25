@@ -2,6 +2,7 @@ using System;
 using System.Collections.Generic;
 using System.Drawing;
 using System.Drawing.Drawing2D;
+using System.Runtime.InteropServices;
 using System.Windows.Forms;
 
 internal static class PopupOutline {
@@ -28,6 +29,7 @@ internal sealed class QuotaPopup : Form {
  private const int PreferredContentWidth = 252;
  private const int PopupCornerRadius = 12;
  private const int GapFromTaskbar = 8;
+ private static readonly IntPtr HwndTopmost = new IntPtr(-1);
  private const TextFormatFlags LineFlags = TextFormatFlags.NoPadding | TextFormatFlags.NoPrefix |
   TextFormatFlags.SingleLine | TextFormatFlags.VerticalCenter;
  private const TextFormatFlags NoteFlags = TextFormatFlags.NoPadding | TextFormatFlags.NoPrefix | TextFormatFlags.WordBreak;
@@ -65,6 +67,9 @@ internal sealed class QuotaPopup : Form {
  private Color textColor, detailColor, borderColor, separatorColor, fiveHourTextColor, weeklyTextColor;
  internal event EventHandler UpdateRequested;
 
+ [DllImport("user32.dll")] [return: MarshalAs(UnmanagedType.Bool)]
+ private static extern bool SetWindowPos(IntPtr window, IntPtr insertAfter, int x, int y, int width, int height, uint flags);
+
  internal QuotaPopup() {
   Text = "AgentMeter Quotas";
   FormBorderStyle = FormBorderStyle.None;
@@ -94,6 +99,15 @@ internal sealed class QuotaPopup : Form {
    parameters.ExStyle |= WsExToolWindow | WsExNoActivate;
    return parameters;
   }
+ }
+
+ protected override void OnVisibleChanged(EventArgs e) {
+  if (Visible) {
+   const uint SwpNoSize = 0x0001, SwpNoMove = 0x0002, SwpNoActivate = 0x0010, SwpNoOwnerZOrder = 0x0200;
+   // Promote the popup on each show without activating it or moving the taskbar in the z-order.
+   SetWindowPos(Handle, HwndTopmost, 0, 0, 0, 0, SwpNoSize | SwpNoMove | SwpNoActivate | SwpNoOwnerZOrder);
+  }
+  base.OnVisibleChanged(e);
  }
 
  internal void UpdateContentAndPosition(List<Row> content, bool lightTheme, int ownerDpi, Rectangle bandBounds,
