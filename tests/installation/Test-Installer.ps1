@@ -99,14 +99,14 @@ $newerVersion = "$($current.Major).$($current.Minor).$($current.Build + 1)"
 $options = '/VERYSILENT', '/SUPPRESSMSGBOXES', '/NORESTART', '/SP-'
 $logDirectory = Join-Path $env:RUNNER_TEMP 'agentmeter-setup-logs'
 [IO.Directory]::CreateDirectory($logDirectory) | Out-Null
-$prerequisiteLog = Join-Path $logDirectory 'prerequisite.log'
-$prerequisiteExitCode = Start-TestSetup $ProductionInstaller ($options + "/LOG=$prerequisiteLog")
-if ($prerequisiteExitCode -eq 0 -or
-    !(Select-String -LiteralPath $prerequisiteLog -SimpleMatch 'No DeskBand-compatible taskbar was detected.' -Quiet)) {
-    throw 'Production Setup should reject a desktop without a detected DeskBand host.'
-}
-
 try {
+    $prerequisiteLog = Join-Path $logDirectory 'prerequisite.log'
+    $prerequisiteExitCode = Start-TestSetup $ProductionInstaller ($options + "/LOG=$prerequisiteLog")
+    if ($prerequisiteExitCode -eq 0 -or
+        !(Select-String -LiteralPath $prerequisiteLog -SimpleMatch 'No DeskBand-compatible taskbar was detected.' -Quiet)) {
+        throw "Production Setup should reject a desktop without a detected DeskBand host (exit code $prerequisiteExitCode)."
+    }
+
     $env:CLAUDE_CONFIG_DIR = Join-Path $logDirectory 'claude'
     [IO.Directory]::CreateDirectory($env:CLAUDE_CONFIG_DIR) | Out-Null
     $claudeSettings = Join-Path $env:CLAUDE_CONFIG_DIR 'settings.json'
