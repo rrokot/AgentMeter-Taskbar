@@ -1,7 +1,8 @@
 param(
     [Parameter(Mandatory)][ValidatePattern('^\d+\.\d+\.\d+$')][string]$Version,
     [Parameter(Mandatory)][string]$InnoCompiler,
-    [string]$OutputDirectory = (Join-Path $PSScriptRoot '..\dist')
+    [string]$OutputDirectory = (Join-Path $PSScriptRoot '..\dist'),
+    [switch]$InstallTestFixture
 )
 
 $ErrorActionPreference = 'Stop'
@@ -29,7 +30,7 @@ $compilerArguments = @(
     "/DToolbarFileName=$toolbarFileName"
     "/DCollectorFileName=$collectorFileName"
     "/DUpdaterFileName=$updaterFileName"
-    $installerSource
 )
-& $InnoCompiler @compilerArguments
+if ($InstallTestFixture) { $compilerArguments += '/DInstallTestFixture' }
+& $InnoCompiler @compilerArguments $installerSource
 if ($LASTEXITCODE -ne 0) { throw 'Could not build AgentMeter Setup.' }

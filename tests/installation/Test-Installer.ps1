@@ -1,5 +1,6 @@
 param(
-    [Parameter(Mandatory)][string]$Installer,
+    [Parameter(Mandatory)][string]$ProductionInstaller,
+    [Parameter(Mandatory)][string]$FixtureInstaller,
     [Parameter(Mandatory)][string]$Version
 )
 
@@ -10,7 +11,6 @@ if ($env:GITHUB_ACTIONS -ne 'true' -or $env:RUNNER_ENVIRONMENT -ne 'github-hoste
 
 $layout = Import-PowerShellDataFile -LiteralPath (Join-Path $PSScriptRoot '..\..\packaging\InstallationLayout.psd1')
 $installDirectory = Join-Path $env:LOCALAPPDATA $layout.DirectoryName
-$startAllBack = 'HKCU:\Software\StartIsBack'
 $productKey = Join-Path 'HKCU:\' $layout.RegistrySubKey
 $versionValueName = $layout.RegistryVersionValueName
 $toolbarKey = 'HKCU:\Software\Classes\CLSID\{EA143E8E-217B-4B86-925B-37EA04848915}'
@@ -18,7 +18,7 @@ $uninstallKey = 'HKCU:\Software\Microsoft\Windows\CurrentVersion\Uninstall\{B8D2
 $sid = [Security.Principal.WindowsIdentity]::GetCurrent().User.Value
 $collectorTask = "AgentMeter Taskbar Collector ($sid)"
 $updateTask = "AgentMeter Taskbar Updates ($sid)"
-foreach ($path in $installDirectory, $startAllBack, $productKey, $toolbarKey, $uninstallKey) {
+foreach ($path in $installDirectory, $productKey, $toolbarKey, $uninstallKey) {
     if (Test-Path -LiteralPath $path) { throw 'The installation-test runner is not clean.' }
 }
 
@@ -48,7 +48,7 @@ function Invoke-TestSignedUpdate([switch]$CheckOnly) {
     $rsa = [Security.Cryptography.RSACryptoServiceProvider]::new(2048)
     $rsa.PersistKeyInCsp = $false
     try {
-        $hash = (Get-FileHash -LiteralPath $Installer -Algorithm SHA256).Hash.ToLowerInvariant()
+        $hash = (Get-FileHash -LiteralPath $installerPath -Algorithm SHA256).Hash.ToLowerInvariant()
         $payload = [Text.Encoding]::UTF8.GetBytes((ConvertTo-Json -InputObject @{ schema = 1; version = $feedVersion; sha256 = $hash }))
         $sha256Oid = [Security.Cryptography.CryptoConfig]::MapNameToOID('SHA256')
         $manifest = @{
@@ -93,19 +93,20 @@ function Invoke-TestSignedUpdate([switch]$CheckOnly) {
     }
 }
 
-$installerPath = (Resolve-Path -LiteralPath $Installer).Path
+$installerPath = (Resolve-Path -LiteralPath $FixtureInstaller).Path
 $current = [version]$Version
 $newerVersion = "$($current.Major).$($current.Minor).$($current.Build + 1)"
 $options = '/VERYSILENT', '/SUPPRESSMSGBOXES', '/NORESTART', '/SP-'
 $logDirectory = Join-Path $env:RUNNER_TEMP 'agentmeter-setup-logs'
 [IO.Directory]::CreateDirectory($logDirectory) | Out-Null
-if ((Start-TestSetup $Installer ($options + "/LOG=$logDirectory\prerequisite.log")) -eq 0) {
-    throw 'Setup should refuse to install without the classic taskbar.'
+$prerequisiteLog = Join-Path $logDirectory 'prerequisite.log'
+$prerequisiteExitCode = Start-TestSetup $ProductionInstaller ($options + "/LOG=$prerequisiteLog")
+if ($prerequisiteExitCode -eq 0 -or
+    !(Select-String -LiteralPath $prerequisiteLog -SimpleMatch 'No DeskBand-compatible taskbar was detected.' -Quiet)) {
+    throw 'Production Setup should reject a desktop without a detected DeskBand host.'
 }
 
 try {
-    New-Item -Path $startAllBack | Out-Null
-    New-ItemProperty -LiteralPath $startAllBack -Name LegacyTaskbar -PropertyType DWord -Value 1 | Out-Null
     $env:CLAUDE_CONFIG_DIR = Join-Path $logDirectory 'claude'
     [IO.Directory]::CreateDirectory($env:CLAUDE_CONFIG_DIR) | Out-Null
     $claudeSettings = Join-Path $env:CLAUDE_CONFIG_DIR 'settings.json'
@@ -122,7 +123,7 @@ try {
         }
     } | ConvertTo-Json -Compress -Depth 6
     [IO.File]::WriteAllText((Join-Path $codexSessions 'rollout-first-install.jsonl'), $codexLog)
-    if ((Start-TestSetup $Installer ($options + "/LOG=$logDirectory\install.log")) -ne 0) {
+    if ((Start-TestSetup $installerPath ($options + "/LOG=$logDirectory\install.log")) -ne 0) {
         throw 'Fresh setup failed.'
     }
     $snapshotPath = Join-Path $installDirectory 'data.json'
@@ -177,13 +178,13 @@ try {
     }
     Set-ItemProperty -LiteralPath $productKey -Name $versionValueName -Value $newerVersion
     try {
-        if ((Start-TestSetup $Installer ($options + "/LOG=$logDirectory\downgrade.log")) -eq 0) {
+        if ((Start-TestSetup $installerPath ($options + "/LOG=$logDirectory\downgrade.log")) -eq 0) {
             throw 'Setup allowed an older version over a newer one.'
         }
     } finally { Set-ItemProperty -LiteralPath $productKey -Name $versionValueName -Value $Version }
     Assert-InstalledVersion $Version
 
-    if ((Start-TestSetup $Installer ($options + "/LOG=$logDirectory\reinstall.log")) -ne 0) {
+    if ((Start-TestSetup $installerPath ($options + "/LOG=$logDirectory\reinstall.log")) -ne 0) {
         throw 'Reinstalling failed.'
     }
     if (!(Get-ScheduledTask -TaskName $updateTask -ErrorAction SilentlyContinue)) {
@@ -212,7 +213,5 @@ try {
         Get-Content -LiteralPath $file.FullName -Tail 35
     }
     throw
-} finally {
-    if (Test-Path -LiteralPath $startAllBack) { Remove-Item -LiteralPath $startAllBack -Recurse }
 }
 Write-Host 'Verified prerequisite check, per-user install, signed background update, sign-in trigger, and uninstall.'

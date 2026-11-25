@@ -31,7 +31,11 @@ RestartIfNeededByRun=no
 SetupMutex=AgentMeterTaskbarInstaller
 WizardStyle=modern
 OutputDir={#OutputDirectory}
+#ifdef InstallTestFixture
+OutputBaseFilename=AgentMeter-Taskbar-Setup-TestFixture-v{#AppVersion}
+#else
 OutputBaseFilename=AgentMeter-Taskbar-Setup-v{#AppVersion}
+#endif
 Compression=lzma2
 SolidCompression=yes
 
@@ -59,15 +63,55 @@ Type: files; Name: "{app}\updates.lock"
 Type: files; Name: "{app}\updates.log"
 
 [Code]
-function InitializeSetup: Boolean;
+#ifndef InstallTestFixture
+const
+  RebarGetBandCount = $040C;
+  AbortIfHung = $0002;
+  ProbeTimeoutMilliseconds = 500;
+
+{ Inno Setup 6 scripts run in a 32-bit process even in 64-bit install mode. }
+function FindChildWindow(Parent, PreviousChild: HWND; ClassName: String; WindowName: Cardinal): HWND;
+  external 'FindWindowExW@user32.dll stdcall';
+
+function QueryWindow(Wnd: HWND; Msg, WParam: Cardinal; LParam: LongInt;
+  Flags, TimeoutMilliseconds: Cardinal; var Reply: Cardinal): LongInt;
+  external 'SendMessageTimeoutW@user32.dll stdcall';
+
+function HasClassicTaskbarHost: Boolean;
 var
-  LegacyTaskbar: Cardinal;
+  Taskbar, BandContainer: HWND;
+  BandCount: Cardinal;
 begin
-  Result := RegQueryDWordValue(HKCU, 'Software\StartIsBack', 'LegacyTaskbar', LegacyTaskbar) and
-    (LegacyTaskbar = 1);
+  Result := False;
+  Taskbar := FindWindowByClassName('Shell_TrayWnd');
+  if Taskbar = 0 then
+    Exit;
+
+  { Classic Explorer taskbars host toolbars in a rebar under the main taskbar window. }
+  BandContainer := FindChildWindow(Taskbar, 0, 'ReBarWindow32', 0);
+  if BandContainer = 0 then
+    Exit;
+
+  BandCount := 0;
+  Result := (QueryWindow(BandContainer, RebarGetBandCount, 0, 0, AbortIfHung, ProbeTimeoutMilliseconds, BandCount) <> 0)
+    and (BandCount > 0);
+end;
+#endif
+
+function InitializeSetup: Boolean;
+begin
+#ifdef InstallTestFixture
+  Result := True;
+#else
+  Result := HasClassicTaskbarHost;
   if not Result then
-    SuppressibleMsgBox('Enable the classic taskbar in StartAllBack before installing AgentMeter Taskbar.',
+  begin
+    Log('No DeskBand-compatible taskbar was detected.');
+    SuppressibleMsgBox(
+      'AgentMeter Taskbar needs a classic taskbar that supports DeskBand toolbars. Enable a compatible taskbar and run Setup again.',
       mbError, MB_OK, IDOK);
+  end;
+#endif
 end;
 
 function PrepareToInstall(var NeedsRestart: Boolean): String;

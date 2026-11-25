@@ -42,9 +42,12 @@ jobs:
           $ErrorActionPreference = 'Stop'
           $version = (Get-Content -LiteralPath VERSION -Raw).Trim()
           & .\build\Build-Installer.ps1 -Version $version -InnoCompiler $env:INNO_COMPILER
-          & .\tests\installation\Test-Installer.ps1 -Installer ".\dist\AgentMeter-Taskbar-Setup-v$version.exe" -Version $version
+          $fixtureDirectory = Join-Path $env:RUNNER_TEMP 'AgentMeterInstallFixture'
+          & .\build\Build-Installer.ps1 -Version $version -InnoCompiler $env:INNO_COMPILER -OutputDirectory $fixtureDirectory -InstallTestFixture
+          $fixture = Join-Path $fixtureDirectory "AgentMeter-Taskbar-Setup-TestFixture-v$version.exe"
+          & .\tests\installation\Test-Installer.ps1 -ProductionInstaller ".\dist\AgentMeter-Taskbar-Setup-v$version.exe" -FixtureInstaller $fixture -Version $version
       - uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6.0.0
         with:
           name: windows-installer
-          path: dist/AgentMeter-Taskbar-Setup-*.exe
+          path: dist/AgentMeter-Taskbar-Setup-v*.exe
           if-no-files-found: error

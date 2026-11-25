@@ -2,7 +2,7 @@
 
 AgentMeter Taskbar shows 5-hour and weekly usage limits for Claude Code, Claude Desktop, and Codex on the Windows 11 taskbar. Hover over the bars to see usage percentages, reset times when available, and the installed version.
 
-Requires Windows 11 x64 and StartAllBack with the classic taskbar enabled.
+Requires Windows 11 x64 and a classic taskbar with DeskBand toolbar support. StartAllBack with the classic taskbar enabled is one example.
 
 **[Download for Windows 11][latest-release]**
 
