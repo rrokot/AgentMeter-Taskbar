@@ -23,7 +23,7 @@ powershell.exe -NoProfile -Command "Invoke-Pester .\tests -EnableExit"
 ```
 
 Windows CI also tests installation, signed updates, the sign-in update trigger, and uninstall using the current build.
-It checks that production Setup rejects the stock taskbar. A separately named installer fixture exercises installation on the hosted runner, where no DeskBand host is active.
+It checks that production Setup rejects an isolated desktop with no DeskBand host. A separately named installer fixture exercises installation independently of the hosted runner's taskbar.
 
 ## Releasing product changes
 

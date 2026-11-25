@@ -100,8 +100,11 @@ $options = '/VERYSILENT', '/SUPPRESSMSGBOXES', '/NORESTART', '/SP-'
 $logDirectory = Join-Path $env:RUNNER_TEMP 'agentmeter-setup-logs'
 [IO.Directory]::CreateDirectory($logDirectory) | Out-Null
 try {
+    Add-Type -Path (Join-Path $PSScriptRoot 'SetupTestDesktop.cs')
+    $productionPath = (Resolve-Path -LiteralPath $ProductionInstaller).Path
     $prerequisiteLog = Join-Path $logDirectory 'prerequisite.log'
-    $prerequisiteExitCode = Start-TestSetup $ProductionInstaller ($options + "/LOG=$prerequisiteLog")
+    $prerequisiteOptions = ($options + ('/LOG="' + $prerequisiteLog + '"')) -join ' '
+    $prerequisiteExitCode = [SetupTestDesktop]::Run($productionPath, $prerequisiteOptions)
     if ($prerequisiteExitCode -eq 0 -or
         !(Select-String -LiteralPath $prerequisiteLog -SimpleMatch 'No DeskBand-compatible taskbar was detected.' -Quiet)) {
         throw "Production Setup should reject a desktop without a detected DeskBand host (exit code $prerequisiteExitCode)."
